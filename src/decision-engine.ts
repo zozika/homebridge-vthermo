@@ -43,6 +43,62 @@ export function computeHeatingDecision(input: HeatingDecisionInput): HeatingDeci
   };
 }
 
+export type DemandReason = "heat" | "frost" | "idle" | "off" | "window" | "no-temperature";
+
+export interface DemandInput {
+  heatMode: boolean;
+  windowOpen: boolean;
+  temperatureAvailable: boolean;
+  currentTemperature: number;
+  targetTemperature: number;
+  hysteresis: number;
+  /** 0 or undefined disables frost protection. */
+  frostProtectionTemperature?: number;
+  currentlyHeating: boolean;
+}
+
+/**
+ * Whether this thermostat asks for heat. Frost protection overrides OFF mode and open windows:
+ * it keeps the room above the frost temperature so pipes and radiators cannot freeze.
+ */
+export function computeDemand(input: DemandInput): { heat: boolean; reason: DemandReason } {
+  if (!input.temperatureAvailable) {
+    return { heat: false, reason: "no-temperature" };
+  }
+
+  const frost = input.frostProtectionTemperature ?? 0;
+  if (frost > 0 && (!input.heatMode || input.windowOpen)) {
+    const frostDecision = computeHeatingDecision({
+      mode: "HEAT",
+      currentTemperature: input.currentTemperature,
+      targetTemperature: frost,
+      hysteresis: input.hysteresis,
+      currentlyHeating: input.currentlyHeating,
+    });
+    if (frostDecision.shouldHeat) {
+      return { heat: true, reason: "frost" };
+    }
+  }
+
+  if (!input.heatMode) {
+    return { heat: false, reason: "off" };
+  }
+
+  if (input.windowOpen) {
+    return { heat: false, reason: "window" };
+  }
+
+  const decision = computeHeatingDecision({
+    mode: "HEAT",
+    currentTemperature: input.currentTemperature,
+    targetTemperature: input.targetTemperature,
+    hysteresis: input.hysteresis,
+    currentlyHeating: input.currentlyHeating,
+  });
+
+  return decision.shouldHeat ? { heat: true, reason: "heat" } : { heat: false, reason: "idle" };
+}
+
 export function aggregateTemperatures(values: number[], mode: TemperatureAggregationMode): number {
   if (!values.length) {
     throw new Error("At least one temperature value is required.");
@@ -73,13 +129,20 @@ export interface RelayPlanInput {
   cutOutSince?: number;
   retryEnabled: boolean;
   retryDelayMs: number;
+  /** Boiler protection: minimum time the relay stays on / off after we switched it. */
+  minOnMs?: number;
+  minOffMs?: number;
+  /** When we last successfully switched the relay. */
+  lastSwitchAt?: number;
   now: number;
 }
 
 export interface RelayPlan {
   action: RelayAction;
   cutOutSince?: number;
-  reason: "in-sync" | "turn-on" | "turn-off" | "cut-out-wait" | "cut-out-retry" | "cut-out-no-retry";
+  reason: "in-sync" | "turn-on" | "turn-off" | "cut-out-wait" | "cut-out-retry" | "cut-out-no-retry" | "min-on-wait" | "min-off-wait";
+  /** For the min-on/off waits: how long until the relay may switch. */
+  waitMs?: number;
 }
 
 /**
@@ -92,11 +155,20 @@ export interface RelayPlan {
  */
 export function planRelayAction(input: RelayPlanInput): RelayPlan {
   const relayOn = input.observedOn ?? input.commandedOn;
+  const sinceSwitch = input.lastSwitchAt === undefined ? Number.POSITIVE_INFINITY : input.now - input.lastSwitchAt;
 
   if (!input.demand) {
-    return relayOn === false
-      ? { action: "none", reason: "in-sync" }
-      : { action: "off", reason: "turn-off" };
+    if (relayOn === false) {
+      return { action: "none", reason: "in-sync" };
+    }
+
+    // Only protect a run we started ourselves; an unknown or foreign "on" is switched off at once.
+    const minOnMs = input.minOnMs ?? 0;
+    if (input.commandedOn === true && relayOn === true && sinceSwitch < minOnMs) {
+      return { action: "none", reason: "min-on-wait", waitMs: minOnMs - sinceSwitch };
+    }
+
+    return { action: "off", reason: "turn-off" };
   }
 
   if (relayOn === true) {
@@ -104,6 +176,11 @@ export function planRelayAction(input: RelayPlanInput): RelayPlan {
   }
 
   if (input.commandedOn !== true) {
+    const minOffMs = input.minOffMs ?? 0;
+    if (input.commandedOn === false && sinceSwitch < minOffMs) {
+      return { action: "none", reason: "min-off-wait", waitMs: minOffMs - sinceSwitch };
+    }
+
     return { action: "on", reason: "turn-on" };
   }
 

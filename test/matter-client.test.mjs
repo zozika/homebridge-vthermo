@@ -96,3 +96,19 @@ test("parses fixed Matter node addresses", async () => {
   assert.equal(parseAddressOverride("192.168.1.68:99999"), undefined);
   assert.equal(parseAddressOverride(""), undefined);
 });
+
+test("recognises a device that lost our pairing from the matter.js log", async () => {
+  const { MatterControllerClient } = await import("../dist/matter-client.js");
+  const client = new MatterControllerClient({
+    log: { info() {}, warn() {}, error() {}, debug() {} },
+    storagePath: "/tmp/vthermo-test-does-not-exist",
+  });
+  client.peerKeys.set("peer1", "@1:1");
+  client.nodeNames.set("peer1", "Aqara Hub M2");
+
+  client.inspectMatterLog("PeerSet Failed to resume connection to @1:1 with udp://x: (Failure (1) / NoSharedTrustRoots (1)) Received general error status");
+  assert.equal(client.problemFor("peer1"), "notPaired");
+  assert.match(client.describeNodeError("peer1", new Error("not reachable")), /Aqara Hub M2 no longer accepts this controller/);
+  assert.equal(client.problemFor("peer2"), undefined);
+  await client.close();
+});

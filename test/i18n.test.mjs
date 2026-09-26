@@ -37,3 +37,12 @@ test("every warning code produced by the plugin is translated", async () => {
     assert.ok(`warning.${code}` in en, code);
   }
 });
+
+test("every demand reason and relay wait state has a label", () => {
+  for (const reason of ["heat", "frost", "idle", "off", "window", "no-temperature"]) {
+    assert.ok(`live.reason.${reason}` in en, reason);
+  }
+  for (const wait of ["min-on-wait", "min-off-wait", "cut-out-wait", "cut-out-no-retry"]) {
+    assert.ok(`live.wait.${wait}` in en, wait);
+  }
+});

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   aggregateTemperatures,
+  computeDemand,
   computeHeatingDecision,
   planRelayAction,
 } from "../dist/decision-engine.js";
@@ -110,4 +111,44 @@ test("relay: cut-out with retry waits for the delay, then switches on again", ()
   });
   assert.equal(late.action, "on");
   assert.equal(late.reason, "cut-out-retry");
+});
+
+test("relay: minimum on-time keeps a relay we switched on", () => {
+  const plan = planRelayAction({ ...base, demand: false, observedOn: true, commandedOn: true, minOnMs: 300_000, lastSwitchAt: base.now - 60_000 });
+  assert.equal(plan.action, "none");
+  assert.equal(plan.reason, "min-on-wait");
+  assert.equal(plan.waitMs, 240_000);
+  assert.equal(planRelayAction({ ...base, demand: false, observedOn: true, commandedOn: true, minOnMs: 300_000, lastSwitchAt: base.now - 300_000 }).action, "off");
+});
+
+test("relay: minimum on-time does not protect an unknown or foreign on-state", () => {
+  assert.equal(planRelayAction({ ...base, demand: false, observedOn: true, commandedOn: false, minOnMs: 300_000, lastSwitchAt: base.now }).action, "off");
+});
+
+test("relay: minimum off-time delays switching on again", () => {
+  const plan = planRelayAction({ ...base, demand: true, observedOn: false, commandedOn: false, minOffMs: 120_000, lastSwitchAt: base.now - 30_000 });
+  assert.equal(plan.reason, "min-off-wait");
+  assert.equal(planRelayAction({ ...base, demand: true, observedOn: false, commandedOn: false, minOffMs: 120_000, lastSwitchAt: base.now - 120_000 }).action, "on");
+});
+
+const demandBase = {
+  heatMode: true, windowOpen: false, temperatureAvailable: true, currentTemperature: 20, targetTemperature: 21,
+  hysteresis: 0.5, frostProtectionTemperature: 0, currentlyHeating: false,
+};
+
+test("demand: heats below target, idles above", () => {
+  assert.deepEqual(computeDemand(demandBase), { heat: true, reason: "heat" });
+  assert.deepEqual(computeDemand({ ...demandBase, currentTemperature: 22 }), { heat: false, reason: "idle" });
+});
+
+test("demand: window and OFF mode stop heating unless frost protection kicks in", () => {
+  assert.equal(computeDemand({ ...demandBase, windowOpen: true }).reason, "window");
+  assert.equal(computeDemand({ ...demandBase, heatMode: false }).reason, "off");
+  assert.deepEqual(computeDemand({ ...demandBase, heatMode: false, currentTemperature: 4, frostProtectionTemperature: 6 }), { heat: true, reason: "frost" });
+  assert.deepEqual(computeDemand({ ...demandBase, windowOpen: true, currentTemperature: 4, frostProtectionTemperature: 6 }), { heat: true, reason: "frost" });
+  assert.equal(computeDemand({ ...demandBase, heatMode: false, currentTemperature: 7, frostProtectionTemperature: 6 }).reason, "off");
+});
+
+test("demand: never heats without a temperature", () => {
+  assert.deepEqual(computeDemand({ ...demandBase, temperatureAvailable: false, frostProtectionTemperature: 30 }), { heat: false, reason: "no-temperature" });
 });

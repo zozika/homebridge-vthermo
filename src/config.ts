@@ -18,6 +18,10 @@ export interface ThermostatConfig {
   defaultTargetTemperature?: number;
   minTargetTemperature?: number;
   maxTargetTemperature?: number;
+  humiditySource?: MatterEndpointReference;
+  minOnMinutes?: number;
+  minOffMinutes?: number;
+  frostProtectionTemperature?: number;
 }
 
 export interface NodeAddressOverrideConfig {
@@ -60,6 +64,11 @@ export interface ResolvedThermostatConfig {
   defaultTargetTemperature: number;
   minTargetTemperature: number;
   maxTargetTemperature: number;
+  humiditySource?: MatterEndpointReference;
+  minOnMinutes: number;
+  minOffMinutes: number;
+  /** 0 = disabled. */
+  frostProtectionTemperature: number;
 }
 
 export interface InvalidThermostatConfig {
@@ -89,6 +98,10 @@ const MAX_CHECK_INTERVAL_SECONDS = 3600;
 const MIN_ALLOWED_TARGET_TEMPERATURE = 5;
 const MAX_ALLOWED_TARGET_TEMPERATURE = 35;
 const MIN_TARGET_RANGE = 1;
+const MAX_MIN_RUN_MINUTES = 60;
+const MIN_FROST_TEMPERATURE = 3;
+const MAX_FROST_TEMPERATURE = 15;
+const MAX_SENSOR_OFFSET = 10;
 const TEMPERATURE_AGGREGATIONS = new Set(["average", "minimum", "maximum"]);
 
 function asNumber(value: unknown): number | undefined {
@@ -149,12 +162,21 @@ function isReference(value: unknown): value is MatterEndpointReference {
     && typeof value.nodeName === "string";
 }
 
+/** Copies a reference and keeps only a sane calibration offset. */
+function sanitizeReference(reference: MatterEndpointReference): MatterEndpointReference {
+  const { offset, ...rest } = reference;
+  const numeric = asNumber(offset);
+  return numeric === undefined || numeric === 0
+    ? rest
+    : { ...rest, offset: clamp(Math.round(numeric * 10) / 10, -MAX_SENSOR_OFFSET, MAX_SENSOR_OFFSET) };
+}
+
 function getReferenceArray(value: unknown): MatterEndpointReference[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value.filter(isReference);
+  return value.filter(isReference).map(sanitizeReference);
 }
 
 function slugify(value: string): string {
@@ -268,7 +290,7 @@ function resolveSingleThermostat(
   const id = normalizeThermostatId(thermostat.id, name, index);
 
   const temperatureSources = getReferenceArray(thermostat.temperatureSources);
-  const legacyTemperatureSource = isReference(thermostat.temperatureSource) ? thermostat.temperatureSource : undefined;
+  const legacyTemperatureSource = isReference(thermostat.temperatureSource) ? sanitizeReference(thermostat.temperatureSource) : undefined;
   const normalizedTemperatureSources = temperatureSources.length
     ? temperatureSources
     : legacyTemperatureSource
@@ -325,6 +347,12 @@ function resolveSingleThermostat(
     180,
   );
 
+  const minOnMinutes = clamp(Math.round(asNumber(thermostat.minOnMinutes) ?? 0), 0, MAX_MIN_RUN_MINUTES);
+  const minOffMinutes = clamp(Math.round(asNumber(thermostat.minOffMinutes) ?? 0), 0, MAX_MIN_RUN_MINUTES);
+  const rawFrost = asNumber(thermostat.frostProtectionTemperature) ?? 0;
+  const frostProtectionTemperature = rawFrost <= 0 ? 0 : clamp(rawFrost, MIN_FROST_TEMPERATURE, MAX_FROST_TEMPERATURE);
+  const humiditySource = isReference(thermostat.humiditySource) ? sanitizeReference(thermostat.humiditySource) : undefined;
+
   const temperatureAggregation = TEMPERATURE_AGGREGATIONS.has(thermostat.temperatureAggregation ?? "")
     ? thermostat.temperatureAggregation as "average" | "minimum" | "maximum"
     : "average";
@@ -349,6 +377,10 @@ function resolveSingleThermostat(
     errors.push("Every door/window sensor must use a Matter Contact Sensor endpoint.");
   }
 
+  if (humiditySource && humiditySource.clusterType !== "relativeHumidityMeasurement") {
+    errors.push("The humidity source must use a Matter Relative Humidity Measurement endpoint.");
+  }
+
   if (errors.length || !normalizedTemperatureSources.length || !isReference(thermostat.switchTarget)) {
     return {
       invalid: {
@@ -365,7 +397,7 @@ function resolveSingleThermostat(
       name,
       temperatureSources: normalizedTemperatureSources,
       temperatureAggregation,
-      switchTarget: thermostat.switchTarget,
+      switchTarget: sanitizeReference(thermostat.switchTarget),
       contactSensors,
       hysteresis,
       checkIntervalSeconds,
@@ -374,6 +406,10 @@ function resolveSingleThermostat(
       defaultTargetTemperature,
       minTargetTemperature: normalizedMin,
       maxTargetTemperature: normalizedMax,
+      humiditySource,
+      minOnMinutes,
+      minOffMinutes,
+      frostProtectionTemperature,
     },
   };
 }

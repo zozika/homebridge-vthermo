@@ -1,8 +1,11 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import process from "node:process";
 
 import { HomebridgePluginUiServer, RequestError } from "@homebridge/plugin-ui-utils";
 
 import { MatterControllerClient } from "../dist/matter-client.js";
+import { MATTER_STORAGE_DIRECTORY, STATUS_FILE } from "../dist/settings.js";
 
 const POST_COMMISSIONING_SETTLE_MS = 2500;
 
@@ -62,6 +65,8 @@ class UiServer extends HomebridgePluginUiServer {
 
     this.onRequest("/bootstrap", (payload) => this.serialized(() => this.handleBootstrap(payload)));
     this.onRequest("/cached", () => this.serialized(() => this.handleCached()));
+    // Reads a file written by the running plugin; never touches Matter, so it is not serialized.
+    this.onRequest("/status", () => this.handleStatus());
     this.onRequest("/pair", (payload) => this.serialized(() => this.handlePair(payload)));
     this.onRequest("/unpair", (payload) => this.serialized(() => this.handleUnpair(payload)));
 
@@ -152,6 +157,16 @@ class UiServer extends HomebridgePluginUiServer {
       fromCache: true,
       warnings: ["cachedSnapshot"],
     };
+  }
+
+  async handleStatus() {
+    try {
+      const raw = await readFile(join(this.storagePath, MATTER_STORAGE_DIRECTORY, STATUS_FILE), "utf8");
+      const status = JSON.parse(raw);
+      return { ...status, ageMs: Date.now() - Date.parse(status.updatedAt) };
+    } catch {
+      return null;
+    }
   }
 
   /** Fast path for opening the page: show the last scan immediately, never touch Matter. */

@@ -8,6 +8,8 @@ export interface RelayDemand {
   heat: boolean;
   retryEnabled: boolean;
   retryDelayMs: number;
+  minOnMs?: number;
+  minOffMs?: number;
 }
 
 export interface RelayObservation {
@@ -35,6 +37,8 @@ export class RelayController {
   private commandedOn?: boolean;
   private observedOn?: boolean;
   private lastCommandAt = 0;
+  /** Last switch from a known state; boiler protection timers count from here. */
+  private lastSwitchAt?: number;
   private cutOutSince?: number;
   private lastReason?: string;
   /** Action whose last attempt failed; repeats are logged quietly until it succeeds. */
@@ -67,6 +71,14 @@ export class RelayController {
     }
   }
 
+  /** Why the relay is not following the demand right now, if it is waiting (for the status page). */
+  get waitingReason(): string | undefined {
+    return this.lastReason === "min-on-wait" || this.lastReason === "min-off-wait"
+      || this.lastReason === "cut-out-wait" || this.lastReason === "cut-out-no-retry"
+      ? this.lastReason
+      : undefined;
+  }
+
   /** Records a thermostat's demand and brings the relay in line. Calls are serialized. */
   update(thermostatId: string, demand: RelayDemand, observation?: RelayObservation): Promise<void> {
     const run = this.chain.catch(() => undefined).then(() => this.apply(thermostatId, demand, observation));
@@ -84,9 +96,14 @@ export class RelayController {
       this.observedOn = observation.on;
     }
 
-    const demanding = [...this.demands.values()].filter((entry) => entry.heat);
+    const all = [...this.demands.values()];
+    const demanding = all.filter((entry) => entry.heat);
     const retrying = demanding.filter((entry) => entry.retryEnabled);
     const plan = planRelayAction({
+      // A shared relay protects the boiler with the strictest setting of its thermostats.
+      minOnMs: Math.max(0, ...all.map((entry) => entry.minOnMs ?? 0)),
+      minOffMs: Math.max(0, ...all.map((entry) => entry.minOffMs ?? 0)),
+      lastSwitchAt: this.lastSwitchAt,
       demand: demanding.length > 0,
       observedOn: this.observedOn,
       commandedOn: this.commandedOn,
@@ -102,6 +119,9 @@ export class RelayController {
         this.log.warn(`${this.label} switched off by itself while heating is needed. Relay retry is disabled, leaving it off.`);
       } else if (plan.reason === "cut-out-wait") {
         this.log.warn(`${this.label} switched off by itself while heating is needed. Retrying later.`);
+      } else if (plan.reason === "min-on-wait" || plan.reason === "min-off-wait") {
+        this.log.debug(`${this.label}: boiler protection, keeping it ${plan.reason === "min-on-wait" ? "on" : "off"} `
+          + `for another ${Math.ceil((plan.waitMs ?? 0) / 1000)}s.`);
       }
       this.lastReason = plan.reason;
     }
@@ -118,6 +138,7 @@ export class RelayController {
       this.log.info(message);
     }
 
+    const stateWasKnown = this.isOn !== undefined;
     try {
       await this.switcher.setSwitchState(this.reference, enable);
     } catch (error) {
@@ -129,6 +150,8 @@ export class RelayController {
     this.commandedOn = enable;
     this.observedOn = enable;
     this.lastCommandAt = this.now();
+    // Syncing an unknown state at startup is not a real switch; do not start the protection timers.
+    this.lastSwitchAt = stateWasKnown ? this.lastCommandAt : undefined;
     this.cutOutSince = undefined;
     this.lastReason = undefined;
   }

@@ -230,3 +230,43 @@ test("native HomeKit references produce a Matter migration error", () => {
   assert.equal(result.invalidThermostats.length, 1);
   assert.match(result.invalidThermostats[0].errors.join(" "), /Native HomeKit/);
 });
+
+test("resolves boiler protection, frost protection, humidity and sensor offsets", () => {
+  const result = resolvePlatformConfig({
+    platform: "VthermoPlatform",
+    thermostats: [{
+      id: "new",
+      name: "New",
+      temperatureSources: [makeReference({ offset: -0.54 }), makeReference({ endpointId: 3, offset: 99 })],
+      switchTarget: makeReference({ endpointId: 8, clusterType: "onOff" }),
+      humiditySource: makeReference({ endpointId: 4, clusterType: "relativeHumidityMeasurement" }),
+      minOnMinutes: 5,
+      minOffMinutes: 120,
+      frostProtectionTemperature: 1,
+    }],
+  });
+
+  const [thermostat] = result.thermostats;
+  assert.equal(thermostat.minOnMinutes, 5);
+  assert.equal(thermostat.minOffMinutes, 60);
+  assert.equal(thermostat.frostProtectionTemperature, 3);
+  assert.equal(thermostat.humiditySource.endpointId, 4);
+  assert.equal(thermostat.temperatureSources[0].offset, -0.5);
+  assert.equal(thermostat.temperatureSources[1].offset, 10);
+});
+
+test("frost protection 0 stays disabled and a wrong humidity endpoint is rejected", () => {
+  const ok = resolvePlatformConfig({
+    platform: "VthermoPlatform",
+    thermostats: [{ id: "a", name: "A", temperatureSources: [makeReference()], switchTarget: makeReference({ clusterType: "onOff" }), frostProtectionTemperature: 0 }],
+  });
+  assert.equal(ok.thermostats[0].frostProtectionTemperature, 0);
+  assert.equal(ok.thermostats[0].minOnMinutes, 0);
+
+  const bad = resolvePlatformConfig({
+    platform: "VthermoPlatform",
+    thermostats: [{ id: "b", name: "B", temperatureSources: [makeReference()], switchTarget: makeReference({ clusterType: "onOff" }), humiditySource: makeReference({ clusterType: "onOff" }) }],
+  });
+  assert.equal(bad.thermostats.length, 0);
+  assert.match(bad.invalidThermostats[0].errors.join(" "), /humidity/);
+});

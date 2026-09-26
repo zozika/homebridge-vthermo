@@ -6,6 +6,8 @@ import "@matter/nodejs";
 
 import {
   ControllerBehavior,
+  LogDestination,
+  LogFormat,
   Logger,
   LogLevel,
   Seconds,
@@ -15,10 +17,11 @@ import {
   type ClientNode,
   type ServerAddressUdp,
 } from "@matter/main";
-import { PeerSet, SessionParameters } from "@matter/protocol";
+import { PeerAddress, PeerSet, SessionParameters } from "@matter/protocol";
 import { BasicInformationClient } from "@matter/main/behaviors/basic-information";
 import { BooleanStateClient } from "@matter/main/behaviors/boolean-state";
 import { OnOffClient } from "@matter/main/behaviors/on-off";
+import { RelativeHumidityMeasurementClient } from "@matter/main/behaviors/relative-humidity-measurement";
 import { TemperatureMeasurementClient } from "@matter/main/behaviors/temperature-measurement";
 import { NodeJsEnvironment } from "@matter/nodejs";
 import { ManualPairingCodeCodec, QrPairingCodeCodec } from "@matter/types/schema";
@@ -38,6 +41,8 @@ import {
   type MatterCommissionableNode,
   type MatterEndpointReference,
   type MatterNodeInventory,
+  type MatterNodeProblem,
+  type MatterOptionPurpose,
   type MatterOption,
   type MatterPairedNodeSummary,
 } from "./matter-model.js";
@@ -50,9 +55,29 @@ const PARTS_LIST_ATTRIBUTE_ID = 0x0003;
 
 const CLUSTER_ATTRIBUTES: Record<MatterClusterType, { clusterId: number; attributeId: number }> = {
   temperatureMeasurement: { clusterId: 0x0402, attributeId: 0x0000 },
+  relativeHumidityMeasurement: { clusterId: 0x0405, attributeId: 0x0000 },
   booleanState: { clusterId: 0x0045, attributeId: 0x0000 },
   onOff: { clusterId: 0x0006, attributeId: 0x0000 },
 };
+
+const CLUSTER_BEHAVIORS: Record<MatterClusterType, unknown> = {
+  temperatureMeasurement: TemperatureMeasurementClient,
+  relativeHumidityMeasurement: RelativeHumidityMeasurementClient,
+  onOff: OnOffClient,
+  booleanState: BooleanStateClient,
+};
+
+const INVENTORY_KINDS: Array<{ clusterType: MatterClusterType; purpose: MatterOptionPurpose; list: keyof InventoryLists }> = [
+  { clusterType: "temperatureMeasurement", purpose: "temperature", list: "temperatureSources" },
+  { clusterType: "relativeHumidityMeasurement", purpose: "humidity", list: "humiditySources" },
+  { clusterType: "onOff", purpose: "switch", list: "switchTargets" },
+  { clusterType: "booleanState", purpose: "contact", list: "contactSensors" },
+];
+
+type InventoryLists = Pick<MatterNodeInventory, "temperatureSources" | "humiditySources" | "switchTargets" | "contactSensors">;
+
+/** How long a "device rejected our pairing" diagnosis stays valid. */
+const PROBLEM_TTL_MS = 10 * 60_000;
 
 const SOFTWARE_VERSION = 200;
 const MDNS_SCANNER_SETTLE_MS = 500;
@@ -90,10 +115,20 @@ export type EndpointReadResult =
   | { ok: true; value: number | boolean }
   | { ok: false; error: string };
 
+export interface MatterNodeStatus {
+  nodeId: string;
+  name: string;
+  online: boolean;
+  lastError?: string;
+  lastSuccessAt?: number;
+  problem?: MatterNodeProblem;
+}
+
 export interface MatterUiSnapshot {
   discoveredNodes: MatterCommissionableNode[];
   pairedNodes: MatterPairedNodeSummary[];
   temperatureSources: MatterOption[];
+  humiditySources: MatterOption[];
   switchTargets: MatterOption[];
   contactSensors: MatterOption[];
   warnings: string[];
@@ -162,6 +197,11 @@ export class MatterControllerClient {
   private controllerPromise?: Promise<ServerNode>;
   private controllerOnlinePromise?: Promise<ServerNode>;
   private closed = false;
+  /** nodeId -> "@fabric:node" as matter.js prints it, and the reverse. */
+  private readonly peerKeys = new Map<string, string>();
+  private readonly nodeNames = new Map<string, string>();
+  private readonly peerProblems = new Map<string, { problem: MatterNodeProblem; at: number }>();
+  private readonly diagnosticsDestination = `vthermo-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
   constructor(options: MatterClientOptions) {
     this.log = options.log;
@@ -181,6 +221,83 @@ export class MatterControllerClient {
     });
     installMatterCompatibilityPatches(this.log);
     this.applyMatterLogLevel();
+    this.installDiagnostics();
+  }
+
+  /**
+   * matter.js swallows the reason a reconnect failed and only reports "not reachable". Listen to
+   * its PeerSet debug log so we can tell users when a device rejected us because it no longer
+   * has our pairing (NoSharedTrustRoots) - that needs re-pairing, not network debugging.
+   */
+  private installDiagnostics(): void {
+    try {
+      Logger.destinations[this.diagnosticsDestination] = LogDestination({
+        name: this.diagnosticsDestination,
+        level: LogLevel.FATAL,
+        facilityLevels: { PeerSet: LogLevel.DEBUG },
+        format: LogFormat.formats.plain,
+        write: (text: string) => this.inspectMatterLog(text),
+      });
+    } catch (error) {
+      this.log.debug(`Could not install Matter diagnostics: ${errorMessage(error)}`);
+    }
+  }
+
+  private inspectMatterLog(text: string): void {
+    if (!text.includes("NoSharedTrustRoots")) {
+      return;
+    }
+
+    const peer = /@[0-9a-f]+:[0-9a-f]+/i.exec(text)?.[0];
+    if (peer) {
+      this.peerProblems.set(peer, { problem: "notPaired", at: Date.now() });
+    }
+  }
+
+  private problemFor(nodeId: string): MatterNodeProblem | undefined {
+    const peer = this.peerKeys.get(nodeId);
+    const entry = peer ? this.peerProblems.get(peer) : undefined;
+    return entry && Date.now() - entry.at < PROBLEM_TTL_MS ? entry.problem : undefined;
+  }
+
+  /** Turns a generic "not reachable" into an actionable message when we know better. */
+  private describeNodeError(nodeId: string, error: unknown): string {
+    if (this.problemFor(nodeId) === "notPaired") {
+      const name = this.nodeNames.get(nodeId) ?? nodeId;
+      return `${name} no longer accepts this controller (NoSharedTrustRoots): its Matter pairing was removed on the device. `
+        + "Remove it in the Vthermo settings and pair it again.";
+    }
+
+    return errorMessage(error);
+  }
+
+  private rememberNode(node: ClientNode): void {
+    this.nodeNames.set(node.id, getNodeName(node));
+    const peerAddress = node.state.commissioning.peerAddress;
+    if (peerAddress) {
+      this.peerKeys.set(node.id, String(PeerAddress(peerAddress)));
+    }
+  }
+
+  /** Health of every node the thermostats talked to, for the status page. */
+  getNodeStatuses(): MatterNodeStatus[] {
+    return [...this.nodeNames.entries()].map(([nodeId, name]) => {
+      const health = this.guard.getHealth(nodeId);
+      return {
+        nodeId,
+        name,
+        online: health.consecutiveFailures === 0 && health.lastSuccessAt !== undefined,
+        lastError: health.lastError ? this.describeNodeError(nodeId, health.lastError) : undefined,
+        lastSuccessAt: health.lastSuccessAt,
+        problem: this.problemFor(nodeId),
+      };
+    });
+  }
+
+  /** Ids of all nodes currently paired with this controller. */
+  async getPairedNodeIds(): Promise<Set<string>> {
+    const controller = await this.getOnlineController();
+    return new Set(this.getCommissionedNodes(controller).map((node) => node.id));
   }
 
   /**
@@ -213,6 +330,7 @@ export class MatterControllerClient {
 
     return {
       ...parsed,
+      humiditySources: Array.isArray(parsed.humiditySources) ? parsed.humiditySources : [],
       cachedAt: parsed.cachedAt ?? metadata.mtime.toISOString(),
     };
   }
@@ -241,6 +359,11 @@ export class MatterControllerClient {
 
   async close(): Promise<void> {
     this.closed = true;
+    try {
+      delete Logger.destinations[this.diagnosticsDestination];
+    } catch {
+      // Already gone.
+    }
     const controllerPromise = this.controllerPromise;
     this.controllerPromise = undefined;
     this.controllerOnlinePromise = undefined;
@@ -290,8 +413,9 @@ export class MatterControllerClient {
           results.set(key, result);
         }
       } catch (error) {
+        const message = this.describeNodeError(nodeId, error);
         for (const reference of nodeReferences) {
-          results.set(referenceKey(reference), { ok: false, error: errorMessage(error) });
+          results.set(referenceKey(reference), { ok: false, error: message });
         }
       }
     }));
@@ -300,6 +424,15 @@ export class MatterControllerClient {
   }
 
   async setSwitchState(reference: MatterEndpointReference, enabled: boolean): Promise<void> {
+    await this.switchWithGuard(reference, enabled).catch((error) => {
+      if (this.problemFor(reference.nodeId)) {
+        throw new Error(this.describeNodeError(reference.nodeId, error));
+      }
+      throw error;
+    });
+  }
+
+  private async switchWithGuard(reference: MatterEndpointReference, enabled: boolean): Promise<void> {
     await this.guard.run(
       reference.nodeId,
       `switching ${describeReference(reference)} ${enabled ? "on" : "off"}`,
@@ -394,9 +527,12 @@ export class MatterControllerClient {
 
   async buildUiSnapshot(options: { discover?: boolean } = {}): Promise<MatterUiSnapshot> {
     const controller = await this.getOnlineController();
-    const temperatureSources = new Map<string, MatterOption>();
-    const switchTargets = new Map<string, MatterOption>();
-    const contactSensors = new Map<string, MatterOption>();
+    const collected: Record<keyof InventoryLists, Map<string, MatterOption>> = {
+      temperatureSources: new Map(),
+      humiditySources: new Map(),
+      switchTargets: new Map(),
+      contactSensors: new Map(),
+    };
 
     // Commissionable discovery (fixed ~12s) runs while the paired nodes are being read.
     const discoveryPromise: Promise<MatterCommissionableNode[]> = options.discover === false
@@ -407,6 +543,7 @@ export class MatterControllerClient {
       });
 
     const pairedNodes = await Promise.all(this.getCommissionedNodes(controller).map(async (node) => {
+      this.rememberNode(node);
       const base = {
         nodeId: node.id,
         deviceIdentifier: node.state.commissioning.deviceIdentifier ?? node.id,
@@ -424,14 +561,10 @@ export class MatterControllerClient {
           INVENTORY_TIMEOUT_MS,
         );
 
-        for (const option of inventory.temperatureSources) {
-          temperatureSources.set(referenceKey(option.reference), option);
-        }
-        for (const option of inventory.switchTargets) {
-          switchTargets.set(referenceKey(option.reference), option);
-        }
-        for (const option of inventory.contactSensors) {
-          contactSensors.set(referenceKey(option.reference), option);
+        for (const list of Object.keys(collected) as Array<keyof InventoryLists>) {
+          for (const option of inventory[list]) {
+            collected[list].set(referenceKey(option.reference), option);
+          }
         }
 
         return {
@@ -440,6 +573,7 @@ export class MatterControllerClient {
           reachable: true,
           endpointsDiscovered: inventory.endpointsDiscovered,
           temperatureSources: inventory.temperatureSources.length,
+          humiditySources: inventory.humiditySources.length,
           switchTargets: inventory.switchTargets.length,
           contactSensors: inventory.contactSensors.length,
         } satisfies MatterPairedNodeSummary;
@@ -447,9 +581,11 @@ export class MatterControllerClient {
         return {
           ...base,
           reachable: false,
-          error: errorMessage(error),
+          error: this.describeNodeError(node.id, error),
+          problem: this.problemFor(node.id),
           endpointsDiscovered: 0,
           temperatureSources: 0,
+          humiditySources: 0,
           switchTargets: 0,
           contactSensors: 0,
         } satisfies MatterPairedNodeSummary;
@@ -462,9 +598,10 @@ export class MatterControllerClient {
     const snapshot: MatterUiSnapshot = {
       discoveredNodes,
       pairedNodes: pairedNodes.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
-      temperatureSources: [...temperatureSources.values()].sort(byLabel),
-      switchTargets: [...switchTargets.values()].sort(byLabel),
-      contactSensors: [...contactSensors.values()].sort(byLabel),
+      temperatureSources: [...collected.temperatureSources.values()].sort(byLabel),
+      humiditySources: [...collected.humiditySources.values()].sort(byLabel),
+      switchTargets: [...collected.switchTargets.values()].sort(byLabel),
+      contactSensors: [...collected.contactSensors.values()].sort(byLabel),
       warnings: ["matterOnly", "bridgeHint", "storageShared"] satisfies WarningCode[],
       cachedAt: new Date().toISOString(),
     };
@@ -489,11 +626,7 @@ export class MatterControllerClient {
     const requested: MatterEndpointReference[] = [];
 
     for (const reference of references) {
-      const behavior = reference.clusterType === "temperatureMeasurement"
-        ? TemperatureMeasurementClient
-        : reference.clusterType === "booleanState"
-          ? BooleanStateClient
-          : OnOffClient;
+      const behavior = CLUSTER_BEHAVIORS[reference.clusterType];
 
       let hasBehavior = false;
       try {
@@ -546,6 +679,10 @@ export class MatterControllerClient {
         return typeof entry.value === "number" && Number.isFinite(entry.value)
           ? { ok: true, value: entry.value / 100 }
           : { ok: false, error: `${describeReference(reference)} has no temperature reading yet.` };
+      case "relativeHumidityMeasurement":
+        return typeof entry.value === "number" && Number.isFinite(entry.value)
+          ? { ok: true, value: entry.value / 100 }
+          : { ok: false, error: `${describeReference(reference)} has no humidity reading yet.` };
       case "booleanState":
         // Contact sensor: StateValue true = contact (closed). We report "open".
         return typeof entry.value === "boolean"
@@ -603,20 +740,7 @@ export class MatterControllerClient {
     const productId = this.getProductId(node);
     const deviceIdentifier = node.state.commissioning.deviceIdentifier ?? node.id;
     const addresses = (node.state.commissioning.addresses ?? []).map((address) => formatAddress(address));
-    const temperatureSources: MatterOption[] = [];
-    const switchTargets: MatterOption[] = [];
-    const contactSensors: MatterOption[] = [];
-
-    const kinds: Array<{
-      behavior: unknown;
-      clusterType: MatterClusterType;
-      purpose: "temperature" | "switch" | "contact";
-      target: MatterOption[];
-    }> = [
-      { behavior: TemperatureMeasurementClient, clusterType: "temperatureMeasurement", purpose: "temperature", target: temperatureSources },
-      { behavior: OnOffClient, clusterType: "onOff", purpose: "switch", target: switchTargets },
-      { behavior: BooleanStateClient, clusterType: "booleanState", purpose: "contact", target: contactSensors },
-    ];
+    const lists: InventoryLists = { temperatureSources: [], humiditySources: [], switchTargets: [], contactSensors: [] };
 
     for (const endpoint of node.endpoints) {
       if (endpoint.number === 0) {
@@ -638,13 +762,13 @@ export class MatterControllerClient {
         productId,
       };
 
-      for (const kind of kinds) {
-        if (!endpoint.behaviors.has(kind.behavior as never)) {
+      for (const kind of INVENTORY_KINDS) {
+        if (!endpoint.behaviors.has(CLUSTER_BEHAVIORS[kind.clusterType] as never)) {
           continue;
         }
 
         const reference: MatterEndpointReference = { ...common, clusterType: kind.clusterType };
-        kind.target.push({ label: createOptionLabel(reference, kind.purpose), reference });
+        lists[kind.list].push({ label: createOptionLabel(reference, kind.purpose), reference });
       }
     }
 
@@ -656,9 +780,7 @@ export class MatterControllerClient {
       productId,
       addresses,
       endpointsDiscovered: [...node.endpoints].filter((endpoint) => endpoint.number !== 0).length,
-      temperatureSources,
-      switchTargets,
-      contactSensors,
+      ...lists,
     };
   }
 
@@ -728,6 +850,7 @@ export class MatterControllerClient {
       throw new Error(`Matter node ${nodeId} is not paired anymore. Pair it again in the Vthermo settings.`);
     }
 
+    this.rememberNode(node);
     await this.startNode(node);
     return node;
   }

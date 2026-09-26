@@ -31,7 +31,7 @@ const config = {
   maxTargetTemperature: 30,
 };
 
-function setup() {
+function setup(overrides = {}) {
   const values = new Map();
   const commands = [];
   const logs = { error: [], warn: [], info: [] };
@@ -58,7 +58,7 @@ function setup() {
   const accessory = new hap.Accessory("Test", hap.uuid.generate("test-thermostat"));
   accessory.context = {};
   const relay = new RelayController(relayRef, client, { info: () => undefined, warn: () => undefined, debug: () => undefined });
-  const thermostat = new VthermoAccessory(platform, accessory, config, relay);
+  const thermostat = new VthermoAccessory(platform, accessory, { ...config, minOnMinutes: 0, minOffMinutes: 0, frostProtectionTemperature: 0, ...overrides }, relay);
   const service = accessory.getService(hap.Service.Thermostat);
   const value = (characteristic) => service.getCharacteristic(characteristic).value;
 
@@ -128,4 +128,36 @@ test("HomeKit set handlers return immediately without Matter traffic", async () 
   assert.equal(reads, 0);
   assert.equal(service.getCharacteristic(hap.Characteristic.TargetTemperature).value, 23);
   thermostat.stop();
+});
+
+test("applies sensor offsets, reports humidity and exposes a status snapshot", async () => {
+  const humidityRef = ref(5, "relativeHumidityMeasurement", "Humidity");
+  const { set, thermostat, value } = setup({
+    temperatureSources: [{ ...sensorA, offset: -1 }],
+    humiditySource: humidityRef,
+  });
+  set(sensorA, 22); set(humidityRef, 48.6); set(windowSensor, false); set(relayRef, false);
+
+  await thermostat.cycle();
+  thermostat.pushState();
+
+  assert.equal(value(hap.Characteristic.CurrentTemperature), 21);
+  assert.equal(value(hap.Characteristic.CurrentRelativeHumidity), 49);
+  const status = thermostat.getStatus();
+  assert.equal(status.currentTemperature, 21);
+  assert.equal(status.humidity, 49);
+  assert.equal(status.demandReason, "idle");
+  assert.deepEqual(status.sources.map((source) => source.kind), ["temperature", "humidity", "contact"]);
+  assert.equal(status.sources[0].offset, -1);
+});
+
+test("frost protection heats in OFF mode", async () => {
+  const { set, thermostat, service, commands } = setup({ frostProtectionTemperature: 6 });
+  await service.getCharacteristic(hap.Characteristic.TargetHeatingCoolingState).handleSetRequest(hap.Characteristic.TargetHeatingCoolingState.OFF);
+  thermostat.stop();
+  set(sensorA, 4); set(sensorB, 4); set(windowSensor, false); set(relayRef, false);
+
+  await thermostat.cycle();
+  assert.deepEqual(commands, [true]);
+  assert.equal(thermostat.getStatus().demandReason, "frost");
 });

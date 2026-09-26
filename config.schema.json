@@ -227,6 +227,30 @@
             "default": 30,
             "minimum": 5,
             "maximum": 35
+          },
+          "humiditySource": {
+            "$ref": "#/definitions/matterReference"
+          },
+          "minOnMinutes": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Boiler protection: minimum relay on-time."
+          },
+          "minOffMinutes": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Boiler protection: minimum relay off-time."
+          },
+          "frostProtectionTemperature": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 15,
+            "description": "Heat below this temperature even when off or a window is open. 0 disables."
           }
         }
       },
@@ -256,6 +280,7 @@
             "type": "string",
             "enum": [
               "temperatureMeasurement",
+              "relativeHumidityMeasurement",
               "onOff",
               "booleanState"
             ]
@@ -295,6 +320,12 @@
           },
           "productId": {
             "type": "number"
+          },
+          "offset": {
+            "type": "number",
+            "minimum": -10,
+            "maximum": 10,
+            "description": "Calibration offset in °C added to temperature readings."
           }
         }
       }

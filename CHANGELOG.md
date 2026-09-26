@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.1.0
+
+### Added
+- **Live status** on the settings page: current and target temperature, humidity, relay state,
+  window state, per-sensor readings and errors for each thermostat, refreshed every 10 s while the
+  plugin runs (the plugin writes `vthermo-matter/status.json`).
+- **Automatic reconnect after re-pairing**: devices that got a new Matter node id are found again by
+  unique id / serial number, both at runtime and on the settings page (save to make it permanent).
+- **Clear "pairing lost" message** when a device rejects the controller (`NoSharedTrustRoots`)
+  instead of a generic "not reachable".
+- **Boiler protection**: minimum relay on-time and off-time (`minOnMinutes`, `minOffMinutes`); a
+  shared relay uses the strictest setting of its thermostats.
+- **Frost protection** (`frostProtectionTemperature`): heats below this temperature even when the
+  thermostat is off or a window is open.
+- **Per-sensor calibration offset** for temperature sources.
+- **Humidity** (`humiditySource`) shown on the thermostat in Apple Home.
+
 ## 2.0.5
 
 ### Added

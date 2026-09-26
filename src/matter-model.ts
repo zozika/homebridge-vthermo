@@ -3,7 +3,9 @@ import { BasicInformationClient } from "@matter/main/behaviors/basic-information
 import { BridgedDeviceBasicInformationClient } from "@matter/main/behaviors/bridged-device-basic-information";
 import { DescriptorClient } from "@matter/main/behaviors/descriptor";
 
-export type MatterClusterType = "temperatureMeasurement" | "onOff" | "booleanState";
+export type MatterClusterType = "temperatureMeasurement" | "relativeHumidityMeasurement" | "onOff" | "booleanState";
+
+export type MatterOptionPurpose = "temperature" | "humidity" | "switch" | "contact";
 
 export interface MatterEndpointReference {
   nodeId: string;
@@ -21,6 +23,8 @@ export interface MatterEndpointReference {
   deviceTypes?: number[];
   vendorId?: number;
   productId?: number;
+  /** Calibration offset added to temperature readings (°C). Stored with the reference. */
+  offset?: number;
 }
 
 export interface MatterOption {
@@ -37,6 +41,7 @@ export interface MatterNodeInventory {
   addresses: string[];
   endpointsDiscovered: number;
   temperatureSources: MatterOption[];
+  humiditySources: MatterOption[];
   switchTargets: MatterOption[];
   contactSensors: MatterOption[];
 }
@@ -50,11 +55,16 @@ export interface MatterPairedNodeSummary {
   addresses: string[];
   reachable: boolean;
   error?: string;
+  /** Machine-readable reason, e.g. "notPaired" when the device no longer knows this controller. */
+  problem?: MatterNodeProblem;
   endpointsDiscovered: number;
   temperatureSources: number;
+  humiditySources: number;
   switchTargets: number;
   contactSensors: number;
 }
+
+export type MatterNodeProblem = "notPaired";
 
 export interface MatterCommissionableNode {
   deviceIdentifier: string;
@@ -203,15 +213,15 @@ export function getEndpointName(endpoint: Endpoint): string {
   return getOwnEndpointName(endpoint);
 }
 
-export function createOptionLabel(
-  reference: MatterEndpointReference,
-  purpose: "temperature" | "switch" | "contact",
-): string {
-  const purposeLabel = purpose === "temperature"
-    ? "Temperature"
-    : purpose === "switch"
-      ? "Switch"
-      : "Contact";
+const PURPOSE_LABELS: Record<MatterOptionPurpose, string> = {
+  temperature: "Temperature",
+  humidity: "Humidity",
+  switch: "Switch",
+  contact: "Contact",
+};
+
+export function createOptionLabel(reference: MatterEndpointReference, purpose: MatterOptionPurpose): string {
+  const purposeLabel = PURPOSE_LABELS[purpose];
 
   const parts = [reference.nodeName];
 

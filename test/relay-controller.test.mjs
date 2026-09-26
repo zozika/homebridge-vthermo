@@ -105,3 +105,32 @@ test("a command that keeps failing is logged once at info level", async () => {
   await relay.update("a", idle).catch(() => undefined);
   assert.equal(infos.length, 1);
 });
+
+test("a shared relay uses the strictest minimum on-time", async () => {
+  const { relay, commands, advance } = makeRelay();
+  relay.register("a");
+  relay.register("b");
+
+  // Unknown state at start: the first idle request switches the relay off once.
+  await relay.update("b", { ...idle, minOnMs: 300_000 });
+  advance(1_000);
+  await relay.update("a", heat);
+  assert.deepEqual(commands, [false, true]);
+  advance(60_000);
+  await relay.update("a", idle);
+  assert.deepEqual(commands, [false, true]);
+  assert.equal(relay.waitingReason, "min-on-wait");
+  advance(240_000);
+  await relay.update("a", idle);
+  assert.deepEqual(commands, [false, true, false]);
+});
+
+test("the startup sync of an unknown relay does not start the minimum off-time", async () => {
+  const { relay, commands, advance } = makeRelay();
+  relay.register("a");
+  const demand = { ...idle, minOffMs: 600_000 };
+  await relay.update("a", demand);
+  advance(1_000);
+  await relay.update("a", { ...demand, heat: true });
+  assert.deepEqual(commands, [false, true]);
+});

@@ -4,6 +4,8 @@ export const PLATFORM_NAME = "VthermoPlatform";
 export const PLUGIN_NAME = "homebridge-vthermo";
 export const MATTER_CONTROLLER_NODE_ID = "vthermo-matter-controller";
 export const MATTER_STORAGE_DIRECTORY = "vthermo-matter";
+/** Live runtime status written by the plugin and shown on the settings page. */
+export const STATUS_FILE = "status.json";
 
 function readPluginVersion(): string {
   try {

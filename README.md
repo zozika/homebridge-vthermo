@@ -22,6 +22,11 @@ switches a Matter On/Off relay or plug. The thermostat shows up in Apple Home li
 - Built-in Matter controller: pair Matter devices or bridges (e.g. Aqara Hub M2) from the settings page
 - Settings page in English or Hungarian
 - Fail-safe: if no temperature can be read, heating is switched off and the thermostat shows a fault in Apple Home
+- Boiler protection: minimum relay on-time and off-time
+- Frost protection: heats below a set temperature even when the thermostat is off or a window is open
+- Per-sensor calibration offset, optional humidity shown on the thermostat
+- Live status on the settings page (temperatures, relay, window, errors) while the plugin runs
+- Devices that were paired again are reconnected to your thermostats automatically
 
 ## Install
 
@@ -64,6 +69,11 @@ Fix it with a DHCP reservation for the device. If it lives in another subnet on 
 an mDNS reflector on your router and allow routing, or set a **fixed address** for the node in the
 settings page (`nodeAddressOverrides`).
 
+**“… no longer accepts this controller (NoSharedTrustRoots)”**: the device lost its Matter pairing
+(e.g. after a reset or when the controller was removed in the Aqara/Apple Home app). Remove the
+pairing in the settings and pair the device again; your thermostat selections are reconnected
+automatically.
+
 **Detailed logging**: turn on *Detailed logging* in the settings. For deep Matter protocol traces
 start Homebridge with `MATTER_LOG_LEVEL=debug`.
 
@@ -87,6 +97,10 @@ The settings page writes the config for you. Reference:
 | `thermostats[].relayRetryDelayMinutes` | `5` | Wait time before the retry (1–180 min) |
 | `thermostats[].defaultTargetTemperature` | `21` | Initial target |
 | `thermostats[].minTargetTemperature` / `maxTargetTemperature` | `10` / `30` | Allowed target range (5–35 °C) |
+| `thermostats[].minOnMinutes` / `minOffMinutes` | `0` / `0` | Boiler protection: minimum relay on/off time (0–60 min) |
+| `thermostats[].frostProtectionTemperature` | `0` | Heat below this even when off or a window is open (0 = disabled, 3–15 °C) |
+| `thermostats[].humiditySource` | | Optional Matter humidity endpoint shown on the thermostat |
+| `temperatureSources[].offset` | | Per-sensor calibration in °C (−10…10), set on the settings page |
 
 Matter controller state is stored in the Homebridge storage folder under `vthermo-matter/`.
 
@@ -122,6 +136,11 @@ On/Off relét vagy konnektort kapcsol. Az Apple Home-ban normál termosztátkén
 - Beépített Matter vezérlő: Matter eszközök vagy bridge-ek (pl. Aqara Hub M2) párosítása a beállítások oldalon
 - Magyar vagy angol beállítások oldal
 - Biztonság: ha egyik hőmérséklet sem olvasható, kikapcsolja a fűtést és hibát jelez az Apple Home-ban
+- Kazánvédelem: minimális bekapcsolt és kikapcsolt relé idő
+- Fagyvédelem: kikapcsolt termosztát vagy nyitott ablak mellett is fűt egy beállított hőmérséklet alatt
+- Érzékelőnkénti korrekció, opcionális páratartalom a termosztáton
+- Élő állapot a beállítások oldalon (hőmérsékletek, relé, ablak, hibák), miközben a plugin fut
+- Az újrapárosított eszközök automatikusan visszakerülnek a termosztátokhoz
 
 ### Beállítás
 

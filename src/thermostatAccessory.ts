@@ -1,7 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from "homebridge";
 
 import type { ResolvedThermostatConfig } from "./config.js";
-import { aggregateTemperatures, computeHeatingDecision } from "./decision-engine.js";
+import { aggregateTemperatures, computeDemand, type DemandReason } from "./decision-engine.js";
 import { referenceKey } from "./matter-model.js";
 import type { VthermoPlatform } from "./platform.js";
 import type { RelayController, RelayObservation } from "./relay-controller.js";
@@ -21,6 +21,26 @@ const STARTUP_RETRY_MS = 15_000;
 /** How long a last good reading may be reused when a sensor temporarily does not answer. */
 const STALE_READING_MS = 10 * 60_000;
 
+export interface ThermostatStatus {
+  id: string;
+  name: string;
+  mode: "HEAT" | "OFF";
+  currentTemperature?: number;
+  targetTemperature: number;
+  humidity?: number;
+  heating: boolean;
+  demandReason: DemandReason;
+  relayName: string;
+  relayOn?: boolean;
+  relayWaiting?: string;
+  windowOpen: boolean;
+  fault?: string;
+  warning?: string;
+  lastReadingAt?: number;
+  lastCycleAt?: number;
+  sources: Array<{ name: string; kind: "temperature" | "humidity" | "contact"; value?: number | boolean; offset?: number; error?: string }>;
+}
+
 export class VthermoAccessory {
   private readonly service: Service;
   private readonly hap;
@@ -36,6 +56,11 @@ export class VthermoAccessory {
   private targetHeatingCoolingState: number;
   private temperatureDisplayUnits: number;
   private heatDemand = false;
+  private demandReason: DemandReason = "idle";
+  private windowOpen = false;
+  private humidity?: number;
+  private lastCycleAt?: number;
+  private sourceStates: ThermostatStatus["sources"] = [];
   private readonly contactStates = new Map<string, { open: boolean; at: number }>();
 
   private faultMessage?: string;
@@ -117,6 +142,16 @@ export class VthermoAccessory {
       this.service.addOptionalCharacteristic(Characteristic.StatusFault);
     }
 
+    if (this.config.humiditySource) {
+      if (!this.service.testCharacteristic(Characteristic.CurrentRelativeHumidity)) {
+        this.service.addOptionalCharacteristic(Characteristic.CurrentRelativeHumidity);
+      }
+      this.service.getCharacteristic(Characteristic.CurrentRelativeHumidity)
+        .onGet(() => this.humidity ?? 0);
+    } else if (this.service.testCharacteristic(Characteristic.CurrentRelativeHumidity)) {
+      this.service.removeCharacteristic(this.service.getCharacteristic(Characteristic.CurrentRelativeHumidity));
+    }
+
     // All getters answer from memory. Matter traffic never blocks HomeKit.
     this.service.getCharacteristic(Characteristic.CurrentTemperature)
       .setProps({ minValue: -50, maxValue: 100, minStep: 0.1 })
@@ -181,6 +216,9 @@ export class VthermoAccessory {
   private pushState(): void {
     const { Characteristic } = this.hap;
     this.service.updateCharacteristic(Characteristic.CurrentTemperature, this.currentTemperature);
+    if (this.config.humiditySource && this.humidity !== undefined) {
+      this.service.updateCharacteristic(Characteristic.CurrentRelativeHumidity, this.humidity);
+    }
     this.service.updateCharacteristic(Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
     this.service.updateCharacteristic(
       Characteristic.StatusFault,
@@ -244,18 +282,39 @@ export class VthermoAccessory {
 
   private async cycle(): Promise<void> {
     const now = Date.now();
-    const references = [...this.config.temperatureSources, ...this.config.contactSensors, this.config.switchTarget];
+    const humiditySource = this.config.humiditySource;
+    const references = [
+      ...this.config.temperatureSources,
+      ...this.config.contactSensors,
+      this.config.switchTarget,
+      ...(humiditySource ? [humiditySource] : []),
+    ];
     const results = await this.platform.controllerClient.readEndpoints(references);
     const problems: string[] = [];
+    const sources: ThermostatStatus["sources"] = [];
 
-    // Temperatures: use every source that answered.
+    // Temperatures: use every source that answered, each with its own calibration offset.
     const temperatures: number[] = [];
     for (const source of this.config.temperatureSources) {
       const result = results.get(referenceKey(source));
       if (result?.ok && typeof result.value === "number") {
-        temperatures.push(result.value);
+        const value = result.value + (source.offset ?? 0);
+        temperatures.push(value);
+        sources.push({ name: source.endpointName, kind: "temperature", value, offset: source.offset });
       } else {
-        problems.push(result && !result.ok ? result.error : `${source.endpointName}: no value`);
+        const error = result && !result.ok ? result.error : `${source.endpointName}: no value`;
+        problems.push(error);
+        sources.push({ name: source.endpointName, kind: "temperature", offset: source.offset, error });
+      }
+    }
+
+    if (humiditySource) {
+      const result = results.get(referenceKey(humiditySource));
+      if (result?.ok && typeof result.value === "number") {
+        this.humidity = Math.min(100, Math.max(0, Math.round(result.value)));
+        sources.push({ name: humiditySource.endpointName, kind: "humidity", value: this.humidity });
+      } else {
+        sources.push({ name: humiditySource.endpointName, kind: "humidity", error: result && !result.ok ? result.error : "no value" });
       }
     }
 
@@ -274,8 +333,11 @@ export class VthermoAccessory {
       const result = results.get(key);
       if (result?.ok && typeof result.value === "boolean") {
         this.contactStates.set(key, { open: result.value, at: now });
+        sources.push({ name: sensor.endpointName, kind: "contact", value: result.value });
       } else {
-        problems.push(result && !result.ok ? result.error : `${sensor.endpointName}: no value`);
+        const error = result && !result.ok ? result.error : `${sensor.endpointName}: no value`;
+        problems.push(error);
+        sources.push({ name: sensor.endpointName, kind: "contact", error });
       }
 
       const state = this.contactStates.get(key);
@@ -290,14 +352,25 @@ export class VthermoAccessory {
       ? { on: relayResult.value, at: now }
       : undefined;
 
-    const heatMode = this.targetHeatingCoolingState !== this.hap.Characteristic.TargetHeatingCoolingState.OFF;
-    this.heatDemand = temperatureError === undefined && heatMode && !anyOpen && computeHeatingDecision({
-      mode: "HEAT",
+    const demand = computeDemand({
+      heatMode: this.targetHeatingCoolingState !== this.hap.Characteristic.TargetHeatingCoolingState.OFF,
+      windowOpen: anyOpen,
+      temperatureAvailable: temperatureError === undefined,
       currentTemperature: this.currentTemperature,
       targetTemperature: this.targetTemperature,
       hysteresis: this.config.hysteresis,
+      frostProtectionTemperature: this.config.frostProtectionTemperature,
       currentlyHeating: this.heatDemand,
-    }).shouldHeat;
+    });
+    if (demand.reason === "frost" && this.demandReason !== "frost") {
+      this.platform.log.warn(`[${this.config.name}] Frost protection: ${this.currentTemperature.toFixed(1)} C is below `
+        + `${this.config.frostProtectionTemperature} C, heating although the thermostat is off or a window is open.`);
+    }
+    this.heatDemand = demand.heat;
+    this.demandReason = demand.reason;
+    this.windowOpen = anyOpen;
+    this.sourceStates = sources;
+    this.lastCycleAt = now;
 
     this.platform.debug(
       `[${this.config.name}] current ${this.currentTemperature.toFixed(2)} C (${temperatures.length}/${this.config.temperatureSources.length} sources), `
@@ -311,6 +384,8 @@ export class VthermoAccessory {
         heat: this.heatDemand,
         retryEnabled: this.config.relayRetryEnabled,
         retryDelayMs: this.config.relayRetryDelayMinutes * 60_000,
+        minOnMs: this.config.minOnMinutes * 60_000,
+        minOffMs: this.config.minOffMinutes * 60_000,
       }, observation);
     } catch (error) {
       relayError = `Failed to control ${this.config.switchTarget.endpointName}: ${error instanceof Error ? error.message : String(error)}`;
@@ -327,6 +402,28 @@ export class VthermoAccessory {
       this.clearFault();
       this.reportPartialProblems(problems);
     }
+  }
+
+  getStatus(): ThermostatStatus {
+    return {
+      id: this.config.id,
+      name: this.config.name,
+      mode: this.modeLabel === "OFF" ? "OFF" : "HEAT",
+      currentTemperature: this.lastTemperatureAt === undefined ? undefined : this.currentTemperature,
+      targetTemperature: this.targetTemperature,
+      humidity: this.humidity,
+      heating: this.currentHeatingCoolingState === this.hap.Characteristic.CurrentHeatingCoolingState.HEAT,
+      demandReason: this.demandReason,
+      relayName: this.config.switchTarget.endpointName,
+      relayOn: this.relay.isOn,
+      relayWaiting: this.relay.waitingReason,
+      windowOpen: this.windowOpen,
+      fault: this.faultMessage,
+      warning: this.lastWarning,
+      lastReadingAt: this.lastTemperatureAt,
+      lastCycleAt: this.lastCycleAt,
+      sources: this.sourceStates,
+    };
   }
 
   // ---------------------------------------------------------------------------------------------

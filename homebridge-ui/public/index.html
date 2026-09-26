@@ -249,6 +249,48 @@
         min-width: auto;
       }
 
+      .status-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .status-card {
+        border: 1px solid color-mix(in srgb, CanvasText 12%, Canvas);
+        border-radius: 6px;
+        padding: 12px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .status-card.heating {
+        border-color: color-mix(in srgb, #e8590c 55%, Canvas);
+        background: color-mix(in srgb, #e8590c 8%, Canvas);
+      }
+
+      .status-card.fault {
+        border-color: crimson;
+      }
+
+      .big-temp {
+        font-size: 1.6rem;
+        font-weight: 600;
+      }
+
+      .source-list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 2px;
+      }
+
+      .offset-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 110px;
+        gap: 8px;
+        align-items: center;
+      }
+
       .lang-select {
         width: auto;
       }
@@ -304,6 +346,14 @@
     </section>
 
     <section class="stack">
+      <div class="section-head">
+        <h2 data-i18n="live.title"></h2>
+        <span id="live-updated" class="muted"></span>
+      </div>
+      <div id="live-status" class="status-grid"></div>
+    </section>
+
+    <section class="stack">
       <h2 data-i18n="paired.title"></h2>
       <div id="paired-nodes" class="list"></div>
     </section>
@@ -322,9 +372,12 @@
     </section>
 
     <script src="i18n.js"></script>
+    <script src="rebind.js"></script>
     <script>
       const PLATFORM = "VthermoPlatform";
-      const NUMBER_FIELDS = ["hysteresis", "checkIntervalSeconds", "relayRetryDelayMinutes", "defaultTargetTemperature", "minTargetTemperature", "maxTargetTemperature"];
+      const NUMBER_FIELDS = ["hysteresis", "checkIntervalSeconds", "relayRetryDelayMinutes", "defaultTargetTemperature", "minTargetTemperature", "maxTargetTemperature", "minOnMinutes", "minOffMinutes", "frostProtectionTemperature"];
+      const STATUS_REFRESH_MS = 10_000;
+      const STATUS_STALE_MS = 60_000;
       const DEFAULTS = {
         temperatureAggregation: "average",
         hysteresis: 0.5,
@@ -334,11 +387,15 @@
         defaultTargetTemperature: 21,
         minTargetTemperature: 10,
         maxTargetTemperature: 30,
+        minOnMinutes: 0,
+        minOffMinutes: 0,
+        frostProtectionTemperature: 0,
       };
 
       const state = {
         config: { platform: PLATFORM, name: "Vthermo Platform", language: "auto", enableVerboseLogging: false, nodeAddressOverrides: [], thermostats: [] },
-        snapshot: { discoveredNodes: [], pairedNodes: [], temperatureSources: [], switchTargets: [], contactSensors: [], warnings: [] },
+        snapshot: { discoveredNodes: [], pairedNodes: [], temperatureSources: [], humiditySources: [], switchTargets: [], contactSensors: [], warnings: [] },
+        live: undefined,
         controllerBusy: false,
         scanning: false,
         homebridgeLang: "en",
@@ -360,6 +417,8 @@
         discoveredNodes: $("discovered-nodes"),
         thermostats: $("thermostats"),
         addThermostat: $("add-thermostat"),
+        liveStatus: $("live-status"),
+        liveUpdated: $("live-updated"),
       };
 
       // ---------------------------------------------------------------------------------------
@@ -469,6 +528,7 @@
           name: t("thermostats.defaultName", { n: index + 1 }),
           temperatureSources: [],
           switchTarget: undefined,
+          humiditySource: undefined,
           contactSensors: [],
           ...DEFAULTS,
         };
@@ -488,6 +548,7 @@
             : raw?.temperatureSource ? [raw.temperatureSource] : [],
           temperatureAggregation: ["average", "minimum", "maximum"].includes(raw?.temperatureAggregation) ? raw.temperatureAggregation : DEFAULTS.temperatureAggregation,
           switchTarget: raw?.switchTarget,
+          humiditySource: raw?.humiditySource,
           contactSensors: Array.isArray(raw?.contactSensors) ? raw.contactSensors.filter(Boolean) : [],
           hysteresis: numberOr(raw?.hysteresis, DEFAULTS.hysteresis),
           checkIntervalSeconds: numberOr(raw?.checkIntervalSeconds, DEFAULTS.checkIntervalSeconds),
@@ -496,6 +557,9 @@
           defaultTargetTemperature: numberOr(raw?.defaultTargetTemperature, DEFAULTS.defaultTargetTemperature),
           minTargetTemperature: numberOr(raw?.minTargetTemperature, DEFAULTS.minTargetTemperature),
           maxTargetTemperature: numberOr(raw?.maxTargetTemperature, DEFAULTS.maxTargetTemperature),
+          minOnMinutes: numberOr(raw?.minOnMinutes, DEFAULTS.minOnMinutes),
+          minOffMinutes: numberOr(raw?.minOffMinutes, DEFAULTS.minOffMinutes),
+          frostProtectionTemperature: numberOr(raw?.frostProtectionTemperature, DEFAULTS.frostProtectionTemperature),
         };
       }
 
@@ -584,6 +648,7 @@
         try {
           await pushConfig();
           await window.homebridge.savePluginConfig();
+          state.reboundUnsaved = 0;
           window.homebridge.disableSaveButton();
           setStatus("status.saved");
           window.homebridge.toast.success(t("status.saved"));
@@ -644,8 +709,11 @@
         if (node.fromConfig) {
           return { pill: "warn", label: "paired.unknown", help: "paired.unknownHelp" };
         }
-        return node.reachable
-          ? { pill: "ok", label: "paired.reachable" }
+        if (node.reachable) {
+          return { pill: "ok", label: "paired.reachable" };
+        }
+        return node.problem === "notPaired"
+          ? { pill: "warn", label: "paired.notPaired", help: "paired.notPairedHelp" }
           : { pill: "warn", label: "paired.unreachable", help: "paired.unreachableHelp" };
       }
 
@@ -676,6 +744,7 @@
               ${node.reachable ? `<p class="muted">${escapeHtml(t("paired.counts", {
                 endpoints: node.endpointsDiscovered,
                 temperature: node.temperatureSources,
+                humidity: node.humiditySources ?? 0,
                 switches: node.switchTargets,
                 contacts: node.contactSensors,
               }))}</p>` : `<p class="notice">${escapeHtml(t(status.help))}</p>`}
@@ -776,18 +845,34 @@
         return merged.map((option) => choiceMarkup(option, selected.some((reference) => sameReference(reference, option.reference)), field, "checkbox")).join("");
       }
 
-      function radioList(options, selected, field, groupName) {
+      function radioList(options, selected, field, groupName, noneKey = "field.noSwitch", noneHelpKey = "field.noSwitchHelp") {
         const merged = mergeSelectedOptions(options, selected ? [selected] : []);
         return [
           `<label class="endpoint-choice">
             <input type="radio" data-field="${field}" name="${escapeHtml(groupName)}" value="" ${selected ? "" : "checked"} />
             <span class="endpoint-choice-body">
-              <span class="endpoint-choice-label">${escapeHtml(t("field.noSwitch"))}</span>
-              <span class="endpoint-choice-meta">${escapeHtml(t("field.noSwitchHelp"))}</span>
+              <span class="endpoint-choice-label">${escapeHtml(t(noneKey))}</span>
+              <span class="endpoint-choice-meta">${escapeHtml(t(noneHelpKey))}</span>
             </span>
           </label>`,
           ...merged.map((option) => choiceMarkup(option, sameReference(option.reference, selected), field, "radio", groupName)),
         ].join("");
+      }
+
+      function offsetsMarkup(thermostat) {
+        if (!thermostat.temperatureSources.length) {
+          return "";
+        }
+        return `
+          <div class="endpoint-field">
+            <span>${escapeHtml(t("field.offsets"))}</span>
+            ${thermostat.temperatureSources.map((reference) => `
+              <label class="offset-row">
+                <span>${escapeHtml(reference.endpointName)} <span class="help">(${escapeHtml(reference.nodeName)})</span></span>
+                <input type="number" step="0.1" min="-10" max="10" data-offset-key="${escapeHtml(referenceKey(reference))}" value="${escapeHtml(reference.offset ?? 0)}" />
+              </label>`).join("")}
+            <span class="help">${escapeHtml(t("field.offsetsHelp"))}</span>
+          </div>`;
       }
 
       function numberField(thermostat, field, labelKey, attributes, helpKey) {
@@ -852,6 +937,9 @@
               ${numberField(thermostat, "defaultTargetTemperature", "field.defaultTarget", 'step="0.5" min="5" max="35"')}
               ${numberField(thermostat, "minTargetTemperature", "field.minTarget", 'step="0.5" min="5" max="35"')}
               ${numberField(thermostat, "maxTargetTemperature", "field.maxTarget", 'step="0.5" min="5" max="35"')}
+              ${numberField(thermostat, "minOnMinutes", "field.minOn", 'step="1" min="0" max="60"', "field.minOnHelp")}
+              ${numberField(thermostat, "minOffMinutes", "field.minOff", 'step="1" min="0" max="60"', "field.minOffHelp")}
+              ${numberField(thermostat, "frostProtectionTemperature", "field.frost", 'step="0.5" min="0" max="15"', "field.frostHelp")}
             </div>
             ${endpointField(
               "field.temperatureSources", "field.temperatureSourcesHelp",
@@ -860,12 +948,19 @@
               checkboxList(snapshot.temperatureSources, thermostat.temperatureSources, "temperatureSources"),
               thermostat.temperatureSources.length ? undefined : "field.missingSources",
             )}
+            ${offsetsMarkup(thermostat)}
             ${endpointField(
               "field.switchTarget", "field.switchTargetHelp",
               thermostat.switchTarget ? 1 : 0,
               mergeSelectedOptions(snapshot.switchTargets, thermostat.switchTarget ? [thermostat.switchTarget] : []).length,
               radioList(snapshot.switchTargets, thermostat.switchTarget, "switchTarget", `switchTarget-${index}`),
               thermostat.switchTarget ? undefined : "field.missingSwitch",
+            )}
+            ${endpointField(
+              "field.humiditySource", "field.humiditySourceHelp",
+              thermostat.humiditySource ? 1 : 0,
+              mergeSelectedOptions(snapshot.humiditySources, thermostat.humiditySource ? [thermostat.humiditySource] : []).length,
+              radioList(snapshot.humiditySources, thermostat.humiditySource, "humiditySource", `humiditySource-${index}`, "field.noHumidity", "field.noHumidityHelp"),
             )}
             ${endpointField(
               "field.contactSensors", "field.contactSensorsHelp",
@@ -887,9 +982,75 @@
         elements.refresh.disabled = false;
         renderStatus();
         renderWarnings();
+        renderLiveStatus();
         renderPairedNodes();
         renderDiscoveredNodes();
         renderThermostats();
+      }
+
+      function formatAge(ms) {
+        const seconds = Math.max(0, Math.round(ms / 1000));
+        return seconds < 90 ? t("live.secondsAgo", { n: seconds }) : t("live.minutesAgo", { n: Math.round(seconds / 60) });
+      }
+
+      function renderLiveStatus() {
+        const live = state.live;
+        if (!live || !Array.isArray(live.thermostats)) {
+          elements.liveUpdated.textContent = "";
+          elements.liveStatus.innerHTML = `<p class="muted">${escapeHtml(t("live.none"))}</p>`;
+          return;
+        }
+
+        const stale = live.ageMs > STATUS_STALE_MS;
+        elements.liveUpdated.textContent = `${t("live.updated", { age: formatAge(live.ageMs) })}${live.version ? ` • v${live.version}` : ""}`;
+
+        const nodeNotes = (live.nodes ?? []).filter((node) => !node.online && node.lastError).map((node) => `
+          <div class="status-card fault">
+            <strong>${escapeHtml(node.name)}</strong>
+            <span class="pill warn">${escapeHtml(t(node.problem === "notPaired" ? "paired.notPaired" : "paired.unreachable"))}</span>
+            <span class="help">${escapeHtml(node.problem === "notPaired" ? t("paired.notPairedHelp") : node.lastError)}</span>
+          </div>`);
+
+        const cards = live.thermostats.map((thermostat) => {
+          const temperature = typeof thermostat.currentTemperature === "number" ? `${thermostat.currentTemperature.toFixed(1)} °C` : "–";
+          const humidity = typeof thermostat.humidity === "number" ? ` • ${thermostat.humidity}%` : "";
+          const relay = thermostat.relayOn === undefined ? t("live.unknown") : t(thermostat.relayOn ? "live.on" : "live.off");
+          const sources = (thermostat.sources ?? []).map((source) => {
+            let value = "–";
+            if (source.error) {
+              value = `⚠️ ${source.error}`;
+            } else if (source.kind === "contact") {
+              value = t(source.value ? "live.open" : "live.closed");
+            } else if (typeof source.value === "number") {
+              value = source.kind === "humidity" ? `${source.value}%` : `${source.value.toFixed(1)} °C${source.offset ? ` (${source.offset > 0 ? "+" : ""}${source.offset})` : ""}`;
+            }
+            return `<li>${escapeHtml(source.name)}: ${escapeHtml(value)}</li>`;
+          }).join("");
+
+          return `
+            <div class="status-card ${thermostat.heating ? "heating" : ""} ${thermostat.fault ? "fault" : ""}">
+              <div class="row">
+                <strong>${escapeHtml(thermostat.name)}</strong>
+                <span class="pill ${thermostat.heating ? "warn" : "ok"}">${escapeHtml(t(`live.reason.${thermostat.demandReason}`))}</span>
+              </div>
+              <span class="big-temp">${escapeHtml(temperature)}<span class="muted">${escapeHtml(humidity)}</span></span>
+              <span class="muted">${escapeHtml(t("live.target", { target: thermostat.targetTemperature.toFixed(1), mode: t(thermostat.mode === "OFF" ? "live.modeOff" : "live.modeHeat") }))}</span>
+              <span class="muted">${escapeHtml(t("live.relay", { name: thermostat.relayName, state: relay }))}${thermostat.relayWaiting ? ` • ${escapeHtml(t(`live.wait.${thermostat.relayWaiting}`))}` : ""}</span>
+              ${thermostat.fault ? `<span class="field-error">${escapeHtml(thermostat.fault)}</span>` : ""}
+              <ul class="source-list help">${sources}</ul>
+            </div>`;
+        });
+
+        elements.liveStatus.innerHTML = (stale ? `<p class="notice">${escapeHtml(t("live.stale"))}</p>` : "") + [...nodeNotes, ...cards].join("");
+      }
+
+      async function refreshLiveStatus() {
+        try {
+          state.live = await window.homebridge.request("/status");
+        } catch {
+          state.live = undefined;
+        }
+        renderLiveStatus();
       }
 
       // ---------------------------------------------------------------------------------------
@@ -904,12 +1065,43 @@
           discoveredNodes: snapshot.discoveredNodes ?? [],
           pairedNodes: snapshot.pairedNodes ?? [],
           temperatureSources: snapshot.temperatureSources ?? [],
+          humiditySources: snapshot.humiditySources ?? [],
           switchTargets: snapshot.switchTargets ?? [],
           contactSensors: snapshot.contactSensors ?? [],
           warnings: snapshot.warnings ?? [],
           cachedAt: snapshot.cachedAt,
         };
         state.controllerBusy = snapshot.controllerBusy === true;
+        return rebindAfterRepair();
+      }
+
+      /** Devices paired again get a new node id: point the saved selections at the new node. */
+      function rebindAfterRepair() {
+        const pairedNodeIds = new Set((state.snapshot.pairedNodes ?? []).map((node) => node.nodeId));
+        if (!pairedNodeIds.size) {
+          return;
+        }
+        const options = [
+          ...state.snapshot.temperatureSources, ...state.snapshot.humiditySources,
+          ...state.snapshot.switchTargets, ...state.snapshot.contactSensors,
+        ];
+        const rebind = (reference) => (reference && window.VthermoRebind.findRebindTarget(reference, options, pairedNodeIds)) || reference;
+        let changed = 0;
+        const count = (before, after) => { if (before !== after) changed += 1; return after; };
+
+        for (const thermostat of state.config.thermostats) {
+          thermostat.temperatureSources = thermostat.temperatureSources.map((reference) => count(reference, rebind(reference)));
+          thermostat.contactSensors = thermostat.contactSensors.map((reference) => count(reference, rebind(reference)));
+          thermostat.switchTarget = count(thermostat.switchTarget, rebind(thermostat.switchTarget));
+          thermostat.humiditySource = count(thermostat.humiditySource, rebind(thermostat.humiditySource));
+        }
+
+        if (changed) {
+          state.reboundUnsaved = (state.reboundUnsaved ?? 0) + changed;
+          markDirty();
+          window.homebridge.toast.info?.(t("status.rebound", { count: changed }));
+        }
+        return changed;
       }
 
       /**
@@ -928,7 +1120,11 @@
         try {
           const snapshot = await window.homebridge.request("/bootstrap");
           applySnapshot(snapshot);
-          setStatus(snapshot.controllerBusy ? "status.cached" : "status.refreshed", { time: formatTime(snapshot.cachedAt) });
+          if (state.reboundUnsaved) {
+            setStatus("status.rebound", { count: state.reboundUnsaved });
+          } else {
+            setStatus(snapshot.controllerBusy ? "status.cached" : "status.refreshed", { time: formatTime(snapshot.cachedAt) });
+          }
         } catch (error) {
           setErrorStatus(error);
         } finally {
@@ -951,8 +1147,8 @@
         window.homebridge.showSpinner();
         try {
           const snapshot = await window.homebridge.request(path, body);
-          applySnapshot(snapshot);
-          setStatus(successKey);
+          const rebound = applySnapshot(snapshot);
+          setStatus(rebound ? "status.rebound" : successKey, { count: rebound });
           window.homebridge.toast.success(t(successKey));
           return true;
         } catch (error) {
@@ -1075,6 +1271,20 @@
 
       elements.thermostats.addEventListener("input", (event) => {
         const input = event.target;
+        if (input.dataset.offsetKey) {
+          const { thermostat } = thermostatFor(input);
+          const reference = thermostat?.temperatureSources.find((entry) => referenceKey(entry) === input.dataset.offsetKey);
+          if (reference) {
+            const value = numberOr(input.value, 0);
+            if (value) {
+              reference.offset = Math.max(-10, Math.min(10, value));
+            } else {
+              delete reference.offset;
+            }
+            markDirty();
+          }
+          return;
+        }
         const field = input.dataset.field;
         if (!field || input.type === "checkbox" || input.type === "radio" || input.tagName === "SELECT") {
           return;
@@ -1108,11 +1318,16 @@
         if (field === "relayRetryEnabled") {
           thermostat.relayRetryEnabled = target.checked;
         } else if (field === "temperatureSources" || field === "contactSensors") {
+          const previous = new Map(thermostat[field].map((reference) => [referenceKey(reference), reference]));
           thermostat[field] = [...container.querySelectorAll(`input[type="checkbox"][data-field="${field}"]:checked`)]
             .map((input) => parseReference(input.value))
-            .filter(Boolean);
-        } else if (field === "switchTarget") {
-          thermostat.switchTarget = parseReference(target.value);
+            .filter(Boolean)
+            .map((reference) => {
+              const offset = previous.get(referenceKey(reference))?.offset;
+              return offset === undefined ? reference : { ...reference, offset };
+            });
+        } else if (field === "switchTarget" || field === "humiditySource") {
+          thermostat[field] = parseReference(target.value);
         } else if (field === "temperatureAggregation") {
           thermostat.temperatureAggregation = target.value;
         } else {
@@ -1161,13 +1376,15 @@
         try {
           const cached = await window.homebridge.request("/cached");
           if (cached) {
-            applySnapshot(cached);
-            setStatus("status.loadingCache");
+            const rebound = applySnapshot(cached);
+            setStatus(rebound ? "status.rebound" : "status.loadingCache", { count: rebound });
           }
         } catch {
           // No cache yet.
         }
         renderAll();
+        void refreshLiveStatus();
+        setInterval(() => void refreshLiveStatus(), STATUS_REFRESH_MS);
         await refreshSnapshot({ background: state.snapshot.cachedAt !== undefined });
       }
 
