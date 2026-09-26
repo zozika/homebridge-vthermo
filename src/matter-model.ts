@@ -112,9 +112,10 @@ export function formatAddress(address: AddressLike): string {
 
 function getBasicInformationName(node: ClientNode): string | undefined {
   const basicInformation = node.maybeStateOf(BasicInformationClient);
-  return basicInformation?.nodeLabel
-    ?? basicInformation?.productName
-    ?? node.state.commissioning.deviceName;
+  // Aqara hubs report an empty nodeLabel; "" must fall through to the product name.
+  return stringValue(basicInformation?.nodeLabel)
+    ?? stringValue(basicInformation?.productName)
+    ?? stringValue(node.state.commissioning.deviceName);
 }
 
 function getOwnEndpointName(endpoint: Endpoint): string {

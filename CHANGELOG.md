@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.4
+
+### Fixed
+- Matter nodes with an empty node label (e.g. Aqara hubs) were shown by their internal id
+  ("peer1") instead of their product name.
+
 ## 2.0.3
 
 ### Changed
