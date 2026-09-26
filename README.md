@@ -4,6 +4,10 @@ A virtual heating thermostat for [Homebridge](https://homebridge.io) (v1.8+ and 
 **Matter** devices: it reads Matter temperature sensors (and optional door/window sensors) and
 switches a Matter On/Off relay or plug. The thermostat shows up in Apple Home like a normal one.
 
+[![npm](https://img.shields.io/npm/v/homebridge-vthermo)](https://www.npmjs.com/package/homebridge-vthermo)
+[![Build and test](https://github.com/zozika/homebridge-vthermo/actions/workflows/build.yml/badge.svg)](https://github.com/zozika/homebridge-vthermo/actions/workflows/build.yml)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-☕-yellow)](https://www.buymeacoffee.com/palmaiz)
+
 > 🇭🇺 Magyar leírás lent: [Magyarul](#magyarul)
 
 ## Features
@@ -86,6 +90,10 @@ The settings page writes the config for you. Reference:
 
 Matter controller state is stored in the Homebridge storage folder under `vthermo-matter/`.
 
+## Support
+
+If Vthermo keeps your home warm, you can [buy me a coffee](https://www.buymeacoffee.com/palmaiz) ☕. Thank you!
+
 ## Development
 
 ```bash
@@ -134,3 +142,7 @@ eszközt a tárolt címen. Általában új IP címet kapott, vagy más alhálóz
 Homebridge (az mDNS nem megy át alhálózatok között). Ellenőrizd a Homebridge gépről a `ping` és az
 `avahi-browse -rt _matter._tcp` paranccsal. Megoldás: fix DHCP cím az eszköznek, mDNS reflektor a
 routeren, vagy **fix cím** megadása a beállítások oldalon.
+
+### Támogatás
+
+Ha a Vthermo melegen tartja az otthonod, meghívhatsz egy [kávéra](https://www.buymeacoffee.com/palmaiz) ☕. Köszönöm!

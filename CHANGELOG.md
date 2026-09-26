@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.5
+
+### Added
+- Buy Me a Coffee link (Donate button in the Homebridge UI, npm and GitHub Sponsor button).
+
 ## 2.0.4
 
 ### Fixed

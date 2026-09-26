@@ -2,7 +2,7 @@
   "name": "homebridge-vthermo",
   "displayName": "Homebridge Vthermo",
   "type": "module",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Virtual thermostat for Homebridge that reads Matter temperature/contact sensors and switches a Matter On/Off relay.",
   "author": "palmaiz",
   "license": "MIT",
@@ -13,6 +13,10 @@
   },
   "bugs": {
     "url": "https://github.com/zozika/homebridge-vthermo/issues"
+  },
+  "funding": {
+    "type": "buymeacoffee",
+    "url": "https://www.buymeacoffee.com/palmaiz"
   },
   "main": "dist/index.js",
   "files": [
