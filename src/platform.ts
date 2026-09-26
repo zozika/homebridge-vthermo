@@ -47,11 +47,12 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       verbose: () => this.verboseLoggingEnabled,
     });
 
+    // Never let a startup or shutdown problem become an unhandled rejection that kills the bridge.
     this.api.on("didFinishLaunching", () => {
-      void this.launch();
+      this.launch().catch((error) => this.log.error(`Vthermo failed to start: ${error instanceof Error ? error.stack ?? error.message : String(error)}`));
     });
     this.api.on("shutdown", () => {
-      void this.shutdown();
+      this.shutdown().catch((error) => this.log.debug(`Vthermo shutdown: ${error instanceof Error ? error.message : String(error)}`));
     });
   }
 
@@ -107,11 +108,11 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
     }
 
     if ((this.config as VthermoPlatformConfig).instantUpdates) {
-      void this.startSubscriptions();
+      this.startSubscriptions().catch((error) => this.log.warn(`Instant updates failed to start: ${String(error)}`));
     }
 
     this.statusTimer = setInterval(() => {
-      void this.writeStatus();
+      this.writeStatus().catch(() => undefined);
     }, STATUS_INTERVAL_MS);
     this.statusTimer.unref?.();
 

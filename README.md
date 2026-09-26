@@ -27,6 +27,9 @@ switches a Matter On/Off relay or plug. The thermostat shows up in Apple Home li
 - Per-sensor calibration offset, optional humidity shown on the thermostat
 - Live status on the settings page (temperatures, relay, window, errors) while the plugin runs
 - Devices that were paired again are reconnected to your thermostats automatically
+- Pair and remove Matter devices while the plugin is running
+- Optional instant updates for window sensors and relays (Matter subscriptions, experimental)
+- Optional Eve app history graphs
 
 ## Install
 
@@ -46,9 +49,9 @@ Running the plugin as a **child bridge** is recommended.
 3. Add a thermostat, then pick its temperature sources, the relay and optional window sensors.
 4. Save and restart the Vthermo child bridge.
 
-**Pairing while the plugin is running:** the running child bridge owns the Matter controller.
-The settings page then shows the last saved scan and pairing buttons are disabled.
-To pair or remove a device, stop the Vthermo child bridge, reload the settings page, pair, then start it again.
+**Pairing while the plugin is running:** the settings page talks to the running plugin through a
+local-only (127.0.0.1), token-protected connection, so you can pair and remove devices without
+stopping anything. When the plugin is not running, the settings page uses the Matter controller itself.
 
 ## Troubleshooting
 
@@ -85,6 +88,8 @@ The settings page writes the config for you. Reference:
 | --- | --- | --- |
 | `language` | `auto` | Settings page language: `auto`, `en`, `hu` |
 | `enableVerboseLogging` | `false` | Detailed runtime logs |
+| `instantUpdates` | `false` | Experimental: Matter subscriptions for window sensors and relays |
+| `enableHistory` | `false` | Eve app history (stored under `vthermo-history/`) |
 | `nodeAddressOverrides` | `[]` | `[{ "nodeId": "...", "address": "192.168.1.68:5540" }]` fixed addresses for nodes mDNS cannot find |
 | `thermostats[].name` | | Name in Apple Home |
 | `thermostats[].temperatureSources` | | Matter temperature endpoints (selected in the UI) |
@@ -141,6 +146,9 @@ On/Off relét vagy konnektort kapcsol. Az Apple Home-ban normál termosztátkén
 - Érzékelőnkénti korrekció, opcionális páratartalom a termosztáton
 - Élő állapot a beállítások oldalon (hőmérsékletek, relé, ablak, hibák), miközben a plugin fut
 - Az újrapárosított eszközök automatikusan visszakerülnek a termosztátokhoz
+- Párosítás és törlés a plugin leállítása nélkül
+- Opcionális azonnali frissítés ablakérzékelőkre és relékre (Matter feliratkozás, kísérleti)
+- Opcionális Eve app előzménygrafikonok
 
 ### Beállítás
 
@@ -150,9 +158,8 @@ On/Off relét vagy konnektort kapcsol. Az Apple Home-ban normál termosztátkén
 3. Adj hozzá termosztátot, és válaszd ki a hőmérséklet-forrásokat, a relét és az opcionális ablakérzékelőket.
 4. Mentsd el, és indítsd újra a Vthermo child bridge-et.
 
-**Párosítás futó plugin mellett:** a futó child bridge használja a Matter vezérlőt, ilyenkor a
-beállítások oldal az utolsó mentett keresést mutatja, a párosítás gombok tiltva vannak. Párosításhoz
-állítsd le a Vthermo child bridge-et, töltsd újra az oldalt, párosíts, majd indítsd újra.
+**Párosítás futó plugin mellett:** a beállítások oldal egy csak helyi (127.0.0.1), tokennel védett
+kapcsolaton át a futó pluginnal párosít, így semmit sem kell leállítani.
 
 ### Hibaelhárítás
 

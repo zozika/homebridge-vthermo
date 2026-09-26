@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.2.0
+
+### Added
+- **Pair and remove devices while the plugin runs.** The running plugin offers its Matter
+  controller to the settings page through a local-only (127.0.0.1), token-protected API
+  (`vthermo-matter/control.json`, readable only by the Homebridge user). Scans on the settings page
+  are live instead of cached while the bridge runs.
+- **Instant updates (experimental, `instantUpdates`)**: Matter subscriptions for window sensors and
+  relays trigger a control cycle within about a second. Polling continues as a fallback, and a
+  failed subscription is retried in the background.
+- **Eve history (`enableHistory`)**: temperature, target and heating graphs in the Eve app.
+
+### Changed
+- Updated to **matter.js 0.17** (the version Homebridge 2.4 uses). Existing pairings are kept and
+  keep their node ids. After updating, going back to 1.x/2.1.x is not supported.
+- Paired node names come from the device after the structure read.
+
 ## 2.1.0
 
 ### Added

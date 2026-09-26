@@ -40,7 +40,7 @@ export class ControlServer {
 
   async start(): Promise<void> {
     const server = createServer((request, response) => {
-      void this.handle(request, response);
+      this.handle(request, response).catch(() => undefined);
     });
     this.server = server;
 

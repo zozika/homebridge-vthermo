@@ -1163,8 +1163,12 @@ export class MatterControllerClient {
     return this.isUdpAddress(address) && address.ip.toLowerCase().startsWith("fe80:") && address.ip.includes("%");
   }
 
+  /** UDP operational address; matter.js 0.17 also stores plain IP addresses without a "type". */
   private isUdpAddress(address: ServerAddress): address is ServerAddressUdp {
-    return address.type === "udp" && typeof address.ip === "string" && typeof address.port === "number";
+    const candidate = address as { type?: string; ip?: unknown; port?: unknown };
+    return (candidate.type === undefined || candidate.type === "udp")
+      && typeof candidate.ip === "string"
+      && typeof candidate.port === "number";
   }
 
   private async persistCommissioningAddresses(node: ClientNode, addresses: readonly ServerAddress[]): Promise<void> {

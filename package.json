@@ -2,7 +2,7 @@
   "name": "homebridge-vthermo",
   "displayName": "Homebridge Vthermo",
   "type": "module",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Virtual thermostat for Homebridge that reads Matter temperature/contact sensors and switches a Matter On/Off relay.",
   "author": "palmaiz",
   "license": "MIT",
@@ -46,10 +46,10 @@
   },
   "dependencies": {
     "@homebridge/plugin-ui-utils": "^2.2.3",
-    "@matter/main": "~0.16.11",
-    "@matter/nodejs": "~0.16.11",
-    "@matter/protocol": "~0.16.11",
-    "@matter/types": "~0.16.11",
+    "@matter/main": "^0.17.9",
+    "@matter/nodejs": "^0.17.9",
+    "@matter/protocol": "^0.17.9",
+    "@matter/types": "^0.17.9",
     "fakegato-history": "^0.6.7"
   },
   "devDependencies": {
