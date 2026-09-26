@@ -13,8 +13,10 @@ export class NodeUnavailableError extends Error {
     readonly nodeId: string,
     readonly retryInMs: number,
     readonly lastError: string,
+    readonly cause?: unknown,
   ) {
-    super(`Matter node ${nodeId} is unreachable (${lastError}). Next attempt in ${Math.ceil(retryInMs / 1000)}s.`);
+    // Keep the message stable across retries so callers can log it once instead of every cycle.
+    super(`Matter node ${nodeId} is not reachable: ${lastError}`);
     this.name = "NodeUnavailableError";
   }
 }
@@ -118,7 +120,7 @@ export class NodeGuard {
     } catch (error) {
       if (this.isNodeLevelFailure(error)) {
         entry.consecutiveFailures += 1;
-        entry.lastError = error instanceof Error ? error.message : String(error);
+        entry.lastError = (error instanceof Error ? error.message : String(error)).trim().replace(/\.+$/, "");
         const backoff = Math.min(
           this.options.baseBackoffMs * 2 ** (entry.consecutiveFailures - 1),
           this.options.maxBackoffMs,
@@ -127,6 +129,9 @@ export class NodeGuard {
         if (entry.consecutiveFailures === 1) {
           this.options.onStateChange?.(nodeId, false, entry.lastError);
         }
+
+        // Same error shape whether this was the failing attempt or a fast-failed one during backoff.
+        throw new NodeUnavailableError(nodeId, backoff, entry.lastError, error);
       }
 
       throw error;

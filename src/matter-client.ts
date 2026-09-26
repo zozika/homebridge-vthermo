@@ -175,7 +175,7 @@ export class MatterControllerClient {
         if (online) {
           this.log.info(`Matter node ${nodeId} is reachable again.`);
         } else {
-          this.log.warn(`Matter node ${nodeId} is not reachable: ${detail ?? "unknown error"}. Retrying with backoff.`);
+          this.log.warn(`Matter node ${nodeId} is not reachable: ${detail ?? "unknown error"}. Retrying in the background.`);
         }
       },
     });

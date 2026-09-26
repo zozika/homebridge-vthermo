@@ -40,12 +40,17 @@ test("runs operations for the same node one after another", async () => {
 test("times out a hanging operation and then fails fast during backoff", async () => {
   const { guard, events, advance } = makeGuard();
 
-  await assert.rejects(guard.run("n1", "hang", () => new Promise(() => undefined)), OperationTimeoutError);
+  const first = await guard.run("n1", "hang", () => new Promise(() => undefined)).catch((error) => error);
+  assert.ok(first instanceof NodeUnavailableError);
+  assert.ok(first.cause instanceof OperationTimeoutError);
   assert.deepEqual(events, ["n1:down"]);
 
   let called = false;
-  await assert.rejects(guard.run("n1", "blocked", async () => { called = true; }), NodeUnavailableError);
+  const second = await guard.run("n1", "blocked", async () => { called = true; }).catch((error) => error);
+  assert.ok(second instanceof NodeUnavailableError);
   assert.equal(called, false);
+  // Identical text for the failing attempt and the fast-failed ones, so it is logged only once.
+  assert.equal(second.message, first.message);
 
   advance(1_000);
   await guard.run("n1", "recovered", async () => "ok");
@@ -79,4 +84,10 @@ test("different nodes do not block each other", async () => {
   const { guard } = makeGuard();
   await assert.rejects(guard.run("n1", "hang", () => new Promise(() => undefined)));
   assert.equal(await guard.run("n2", "ok", async () => 42), 42);
+});
+
+test("strips trailing dots from the underlying error", async () => {
+  const { guard } = makeGuard();
+  const error = await guard.run("n1", "x", async () => { throw new Error("@1:1 is not reachable right now."); }).catch((e) => e);
+  assert.equal(error.message, "Matter node n1 is not reachable: @1:1 is not reachable right now");
 });

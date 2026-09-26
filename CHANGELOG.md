@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.1
+
+### Fixed
+- An unreachable Matter node is now reported with the same message on every attempt, so each
+  thermostat logs it once instead of on every cycle ("Next attempt in 30s/15s…").
+- A relay command that keeps failing is logged once; retries are only visible with detailed logging.
+- Removed the doubled full stop in "not reachable right now.." messages.
+- HAP no longer warns about the StatusFault characteristic on the Thermostat service.
+
 ## 2.0.0
 
 ### Fixed

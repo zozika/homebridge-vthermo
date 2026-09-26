@@ -37,6 +37,8 @@ export class RelayController {
   private lastCommandAt = 0;
   private cutOutSince?: number;
   private lastReason?: string;
+  /** Action whose last attempt failed; repeats are logged quietly until it succeeds. */
+  private failedAction?: boolean;
   private chain: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -109,8 +111,21 @@ export class RelayController {
     }
 
     const enable = plan.action === "on";
-    this.log.info(`Turning ${this.label} ${enable ? "on" : "off"}${plan.reason === "cut-out-retry" ? " again after a cut-out" : ""}.`);
-    await this.switcher.setSwitchState(this.reference, enable);
+    const message = `Turning ${this.label} ${enable ? "on" : "off"}${plan.reason === "cut-out-retry" ? " again after a cut-out" : ""}.`;
+    if (this.failedAction === enable) {
+      this.log.debug(`${message} (retry)`);
+    } else {
+      this.log.info(message);
+    }
+
+    try {
+      await this.switcher.setSwitchState(this.reference, enable);
+    } catch (error) {
+      this.failedAction = enable;
+      throw error;
+    }
+
+    this.failedAction = undefined;
     this.commandedOn = enable;
     this.observedOn = enable;
     this.lastCommandAt = this.now();

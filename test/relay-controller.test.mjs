@@ -90,3 +90,18 @@ test("a failed command is reported and retried on the next update", async () => 
   await relay.update("a", heat);
   assert.deepEqual(commands, [true]);
 });
+
+test("a command that keeps failing is logged once at info level", async () => {
+  const infos = [];
+  const relay = new RelayController(
+    reference,
+    { setSwitchState: async () => { throw new Error("unreachable"); } },
+    { info: (m) => infos.push(m), warn: () => undefined, debug: () => undefined },
+  );
+  relay.register("a");
+
+  await relay.update("a", idle).catch(() => undefined);
+  await relay.update("a", idle).catch(() => undefined);
+  await relay.update("a", idle).catch(() => undefined);
+  assert.equal(infos.length, 1);
+});
