@@ -49,7 +49,8 @@
     "@matter/main": "~0.16.11",
     "@matter/nodejs": "~0.16.11",
     "@matter/protocol": "~0.16.11",
-    "@matter/types": "~0.16.11"
+    "@matter/types": "~0.16.11",
+    "fakegato-history": "^0.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

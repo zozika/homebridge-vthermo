@@ -4,9 +4,10 @@ import { join } from "node:path";
 import type { API, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from "homebridge";
 
 import { resolvePlatformConfig } from "./config.js";
+import { ControlServer } from "./control-server.js";
 import type { ResolvedThermostatConfig, VthermoPlatformConfig } from "./config.js";
 import { MatterControllerClient, type MatterUiSnapshot } from "./matter-client.js";
-import { referenceKey } from "./matter-model.js";
+import { referenceKey, type MatterEndpointReference } from "./matter-model.js";
 import { withTimeout } from "./node-guard.js";
 import { rebindInPlace } from "./rebind.js";
 import { RelayController } from "./relay-controller.js";
@@ -16,6 +17,7 @@ import { VthermoAccessory } from "./thermostatAccessory.js";
 /** Refresh the settings-page cache once the thermostats had time to do their first reads. */
 const UI_SNAPSHOT_DELAY_MS = 90_000;
 const CONTROLLER_START_TIMEOUT_MS = 30_000;
+const SUBSCRIPTION_RETRY_MS = 5 * 60_000;
 /** How often the live status for the settings page is written. */
 const STATUS_INTERVAL_MS = 10_000;
 
@@ -29,6 +31,9 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
   private readonly thermostatConfigs: ResolvedThermostatConfig[] = [];
   private snapshotTimer?: NodeJS.Timeout;
   private statusTimer?: NodeJS.Timeout;
+  private controlServer?: ControlServer;
+  private readonly subscriptionClosers: Array<() => void> = [];
+  private shuttingDown = false;
 
   constructor(
     public readonly log: Logging,
@@ -52,6 +57,10 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
 
   configureAccessory(accessory: PlatformAccessory): void {
     this.cachedAccessories.set(accessory.UUID, accessory);
+  }
+
+  get historyEnabled(): boolean {
+    return (this.config as VthermoPlatformConfig).enableHistory === true;
   }
 
   get verboseLoggingEnabled(): boolean {
@@ -81,6 +90,7 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
         if (cached) {
           await this.rebindReferences(cached);
         }
+        await this.startControlServer();
       } catch (error) {
         this.log.error(`Could not start the Matter controller: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -94,6 +104,10 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
 
     for (const thermostat of this.thermostats) {
       thermostat.start();
+    }
+
+    if ((this.config as VthermoPlatformConfig).instantUpdates) {
+      void this.startSubscriptions();
     }
 
     this.statusTimer = setInterval(() => {
@@ -142,6 +156,91 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
     }
   }
 
+  /** One subscription per node for all window sensors and relays; a change triggers the affected thermostats. */
+  private async startSubscriptions(): Promise<void> {
+    const byNode = new Map<string, Map<string, MatterEndpointReference>>();
+    for (const thermostat of this.thermostats) {
+      for (const reference of thermostat.watchedReferences) {
+        const references = byNode.get(reference.nodeId) ?? new Map();
+        references.set(referenceKey(reference), reference);
+        byNode.set(reference.nodeId, references);
+      }
+    }
+
+    const onChange = (key: string) => {
+      for (const thermostat of this.thermostats) {
+        if (thermostat.watchedReferences.some((reference) => referenceKey(reference) === key)) {
+          thermostat.requestCycle();
+        }
+      }
+    };
+
+    const subscribe = async (nodeId: string, references: MatterEndpointReference[], attempt: number): Promise<void> => {
+      if (this.shuttingDown) {
+        return;
+      }
+
+      try {
+        this.subscriptionClosers.push(await this.controllerClient.subscribeToChanges(nodeId, references, onChange));
+        this.log.info(`Instant updates enabled for ${references.length} window sensor/relay endpoint(s) on Matter node ${nodeId}.`);
+      } catch (error) {
+        if (attempt === 1) {
+          this.log.warn(`Instant updates for Matter node ${nodeId} are not available yet, using polling meanwhile: `
+            + `${error instanceof Error ? error.message : String(error)}`);
+        }
+        // Keep trying in the background, e.g. until an unreachable hub comes back.
+        const retry = setTimeout(() => {
+          void subscribe(nodeId, references, attempt + 1);
+        }, SUBSCRIPTION_RETRY_MS);
+        retry.unref?.();
+      }
+    };
+
+    for (const [nodeId, references] of byNode) {
+      void subscribe(nodeId, [...references.values()], 1);
+    }
+  }
+
+  /** Lets the settings page pair and scan through this running controller (see control-server.ts). */
+  private async startControlServer(): Promise<void> {
+    const snapshot = async (discover: boolean) => {
+      const result = await this.controllerClient.buildUiSnapshot({ discover });
+      await this.rebindReferences(result);
+      return { ...result, viaBridge: true };
+    };
+
+    const server = new ControlServer(this.api.user.storagePath(), {
+      "/snapshot": async (body) => snapshot(body.discover !== false),
+      "/pair": async (body) => {
+        const pairingCode = typeof body.pairingCode === "string" ? body.pairingCode.trim() : "";
+        const deviceIdentifier = typeof body.deviceIdentifier === "string" ? body.deviceIdentifier : "";
+        this.log.info(`Pairing a Matter device from the settings page${deviceIdentifier ? ` (${deviceIdentifier})` : ""}.`);
+        try {
+          await this.controllerClient.commissionDevice(deviceIdentifier, pairingCode);
+        } catch (error) {
+          if (!(error instanceof Error && error.message.includes("already commissioned into this fabric"))) {
+            throw error;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        return snapshot(true);
+      },
+      "/unpair": async (body) => {
+        const nodeId = typeof body.nodeId === "string" ? body.nodeId : "";
+        this.log.info(`Removing Matter node ${nodeId} from the settings page.`);
+        await this.controllerClient.removeNode(nodeId);
+        return snapshot(true);
+      },
+    }, { warn: (message) => this.log.warn(message), debug: (message) => this.log.debug(message) });
+
+    try {
+      await server.start();
+      this.controlServer = server;
+    } catch (error) {
+      this.log.warn(`Settings-page pairing while running is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private async writeStatus(): Promise<void> {
     const directory = join(this.api.user.storagePath(), MATTER_STORAGE_DIRECTORY);
     const path = join(directory, STATUS_FILE);
@@ -163,6 +262,7 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
   }
 
   private async shutdown(): Promise<void> {
+    this.shuttingDown = true;
     if (this.snapshotTimer) {
       clearTimeout(this.snapshotTimer);
     }
@@ -174,6 +274,14 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       thermostat.stop();
     }
 
+    for (const close of this.subscriptionClosers) {
+      try {
+        close();
+      } catch {
+        // Already closed.
+      }
+    }
+    await this.controlServer?.stop();
     await this.controllerClient.close();
   }
 

@@ -29,6 +29,17 @@
         "type": "boolean",
         "default": false
       },
+      "instantUpdates": {
+        "title": "Instant updates (experimental)",
+        "type": "boolean",
+        "default": false,
+        "description": "Matter subscriptions for window sensors and relays; polling continues as fallback."
+      },
+      "enableHistory": {
+        "title": "Eve history",
+        "type": "boolean",
+        "default": false
+      },
       "nodeAddressOverrides": {
         "title": "Fixed Matter node addresses",
         "description": "Optional. Use only when mDNS discovery cannot find a paired node (e.g. different subnet).",

@@ -5,7 +5,10 @@ import process from "node:process";
 import { HomebridgePluginUiServer, RequestError } from "@homebridge/plugin-ui-utils";
 
 import { MatterControllerClient } from "../dist/matter-client.js";
-import { MATTER_STORAGE_DIRECTORY, STATUS_FILE } from "../dist/settings.js";
+import { CONTROL_FILE, MATTER_STORAGE_DIRECTORY, STATUS_FILE } from "../dist/settings.js";
+
+/** Pairing a large bridge can take a while; the running plugin answers when it is done. */
+const BRIDGE_REQUEST_TIMEOUT_MS = 180_000;
 
 const POST_COMMISSIONING_SETTLE_MS = 2500;
 
@@ -36,6 +39,21 @@ function isMatterControllerBusyError(error) {
     || message.includes("Matter controller is already active")
     || message.includes("database is locked")
     || message.includes("SQLITE_BUSY");
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists but belongs to someone else - still alive.
+    return error?.code === "EPERM";
+  }
+}
+
+function isConnectionRefused(error) {
+  const code = error?.cause?.code ?? error?.code;
+  return code === "ECONNREFUSED" || code === "ECONNRESET";
 }
 
 function requestError(code, message, status = 400) {
@@ -122,6 +140,45 @@ class UiServer extends HomebridgePluginUiServer {
     return this.homebridgeStoragePath;
   }
 
+  /**
+   * Sends the request to the running Vthermo child bridge, which owns the Matter controller.
+   * Returns undefined when the plugin is not running, so the caller can use its own controller.
+   */
+  async viaRunningPlugin(path, body = {}) {
+    let control;
+    try {
+      control = JSON.parse(await readFile(join(this.storagePath, MATTER_STORAGE_DIRECTORY, CONTROL_FILE), "utf8"));
+    } catch {
+      return undefined;
+    }
+
+    if (!control?.port || !control?.token || !isProcessAlive(control.pid)) {
+      return undefined;
+    }
+
+    let response;
+    try {
+      response = await fetch(`http://127.0.0.1:${control.port}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${control.token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (isConnectionRefused(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new RequestError(data.error ?? `The running Vthermo plugin answered with HTTP ${response.status}.`, { status: response.status });
+    }
+
+    return { result: data.result };
+  }
+
   async withClient(work) {
     const client = new MatterControllerClient({ log: uiLogger, storagePath: this.storagePath });
 
@@ -175,6 +232,11 @@ class UiServer extends HomebridgePluginUiServer {
   }
 
   async handleBootstrap() {
+    const viaPlugin = await this.viaRunningPlugin("/snapshot", { discover: true });
+    if (viaPlugin) {
+      return viaPlugin.result;
+    }
+
     try {
       return await this.withClient((client) => client.buildUiSnapshot());
     } catch (error) {
@@ -199,6 +261,11 @@ class UiServer extends HomebridgePluginUiServer {
       throw requestError("missingPairingCode", "Enter the Matter manual pairing code or paste the MT: QR pairing code.");
     }
 
+    const viaPlugin = await this.viaRunningPlugin("/pair", { deviceIdentifier, pairingCode });
+    if (viaPlugin) {
+      return viaPlugin.result;
+    }
+
     return this.withClient(async (client) => {
       try {
         await client.commissionDevice(deviceIdentifier, pairingCode);
@@ -217,6 +284,11 @@ class UiServer extends HomebridgePluginUiServer {
     const nodeId = typeof payload?.nodeId === "string" ? payload.nodeId : "";
     if (!nodeId) {
       throw requestError("missingNodeId", "Missing paired Matter node id.");
+    }
+
+    const viaPlugin = await this.viaRunningPlugin("/unpair", { nodeId });
+    if (viaPlugin) {
+      return viaPlugin.result;
     }
 
     return this.withClient(async (client) => {

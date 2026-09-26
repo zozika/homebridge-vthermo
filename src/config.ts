@@ -33,6 +33,10 @@ export interface VthermoPlatformConfig extends PlatformConfig {
   name?: string;
   language?: "auto" | "en" | "hu";
   enableVerboseLogging?: boolean;
+  /** Experimental: Matter subscriptions for window sensors and relays. */
+  instantUpdates?: boolean;
+  /** Eve app history graphs for the thermostats. */
+  enableHistory?: boolean;
   nodeAddressOverrides?: NodeAddressOverrideConfig[];
   thermostats?: ThermostatConfig[];
   temperatureSources?: MatterEndpointReference[];

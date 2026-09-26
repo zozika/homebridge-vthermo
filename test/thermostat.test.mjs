@@ -31,7 +31,7 @@ const config = {
   maxTargetTemperature: 30,
 };
 
-function setup(overrides = {}) {
+function setup(overrides = {}, platformOptions = {}) {
   const values = new Map();
   const commands = [];
   const logs = { error: [], warn: [], info: [] };
@@ -48,7 +48,8 @@ function setup(overrides = {}) {
     },
   };
   const platform = {
-    api: { hap, updatePlatformAccessories: () => undefined },
+    api: { hap, updatePlatformAccessories: () => undefined, user: { storagePath: () => platformOptions.storage ?? "/tmp" } },
+    historyEnabled: platformOptions.historyEnabled ?? false,
     log: {
       error: (m) => logs.error.push(m), warn: (m) => logs.warn.push(m), info: (m) => logs.info.push(m), debug: () => undefined,
     },
@@ -160,4 +161,18 @@ test("frost protection heats in OFF mode", async () => {
   await thermostat.cycle();
   assert.deepEqual(commands, [true]);
   assert.equal(thermostat.getStatus().demandReason, "frost");
+});
+
+test("records Eve history entries when enabled", async () => {
+  const { mkdtemp, readdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const storage = await mkdtemp(join(tmpdir(), "vthermo-history-"));
+  const { set, thermostat } = setup({}, { historyEnabled: true, storage });
+  set(sensorA, 20); set(sensorB, 20); set(windowSensor, false); set(relayRef, false);
+
+  await thermostat.cycle();
+  assert.ok(thermostat.history, "history service created");
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.deepEqual(await readdir(join(storage, "vthermo-history")), ["vthermo-t1.json"]);
 });

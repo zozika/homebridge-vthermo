@@ -341,6 +341,20 @@
           <span data-i18n="app.verboseHelp"></span>
         </span>
       </label>
+      <label>
+        <span data-i18n="app.instant"></span>
+        <span class="toggle-option">
+          <input id="instant-updates" type="checkbox" />
+          <span data-i18n="app.instantHelp"></span>
+        </span>
+      </label>
+      <label>
+        <span data-i18n="app.history"></span>
+        <span class="toggle-option">
+          <input id="enable-history" type="checkbox" />
+          <span data-i18n="app.historyHelp"></span>
+        </span>
+      </label>
       <p id="status" class="status muted" role="status"></p>
       <ul id="warnings" class="warning-list muted"></ul>
     </section>
@@ -409,6 +423,8 @@
         language: $("language"),
         platformName: $("platform-name"),
         verboseLogging: $("verbose-logging"),
+        instantUpdates: $("instant-updates"),
+        enableHistory: $("enable-history"),
         refresh: $("refresh"),
         save: $("save"),
         status: $("status"),
@@ -573,6 +589,8 @@
           name: typeof block?.name === "string" && block.name.trim() ? block.name.trim() : "Vthermo Platform",
           language: ["auto", "en", "hu"].includes(block?.language) ? block.language : "auto",
           enableVerboseLogging: block?.enableVerboseLogging === true,
+          instantUpdates: block?.instantUpdates === true,
+          enableHistory: block?.enableHistory === true,
           nodeAddressOverrides: Array.isArray(block?.nodeAddressOverrides)
             ? block.nodeAddressOverrides.filter((entry) => entry && typeof entry.nodeId === "string" && typeof entry.address === "string")
             : [],
@@ -586,6 +604,8 @@
           name: elements.platformName.value.trim() || "Vthermo Platform",
           language: state.config.language,
           enableVerboseLogging: elements.verboseLogging.checked,
+          instantUpdates: elements.instantUpdates.checked,
+          enableHistory: elements.enableHistory.checked,
           nodeAddressOverrides: state.config.nodeAddressOverrides.filter((entry) => entry.address.trim()),
           thermostats: state.config.thermostats,
         };
@@ -979,6 +999,8 @@
         elements.language.value = state.config.language;
         elements.platformName.value = state.config.name;
         elements.verboseLogging.checked = !!state.config.enableVerboseLogging;
+        elements.instantUpdates.checked = !!state.config.instantUpdates;
+        elements.enableHistory.checked = !!state.config.enableHistory;
         elements.refresh.disabled = false;
         renderStatus();
         renderWarnings();
@@ -1072,6 +1094,9 @@
           cachedAt: snapshot.cachedAt,
         };
         state.controllerBusy = snapshot.controllerBusy === true;
+        if (snapshot.viaBridge && !state.snapshot.warnings.includes("viaBridge")) {
+          state.snapshot.warnings = ["viaBridge", ...state.snapshot.warnings];
+        }
         return rebindAfterRepair();
       }
 
@@ -1210,6 +1235,16 @@
 
       elements.verboseLogging.addEventListener("change", () => {
         state.config.enableVerboseLogging = elements.verboseLogging.checked;
+        markDirty();
+      });
+
+      elements.instantUpdates.addEventListener("change", () => {
+        state.config.instantUpdates = elements.instantUpdates.checked;
+        markDirty();
+      });
+
+      elements.enableHistory.addEventListener("change", () => {
+        state.config.enableHistory = elements.enableHistory.checked;
         markDirty();
       });
 

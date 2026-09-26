@@ -1,8 +1,12 @@
-import type { CharacteristicValue, PlatformAccessory, Service } from "homebridge";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+import fakegato from "fakegato-history";
+import type { API, CharacteristicValue, PlatformAccessory, Service } from "homebridge";
 
 import type { ResolvedThermostatConfig } from "./config.js";
 import { aggregateTemperatures, computeDemand, type DemandReason } from "./decision-engine.js";
-import { referenceKey } from "./matter-model.js";
+import { referenceKey, type MatterEndpointReference } from "./matter-model.js";
 import type { VthermoPlatform } from "./platform.js";
 import type { RelayController, RelayObservation } from "./relay-controller.js";
 import { PLUGIN_VERSION } from "./settings.js";
@@ -12,6 +16,13 @@ interface PersistedState {
   targetHeatingCoolingState?: number;
   temperatureDisplayUnits?: number;
   lastTemperature?: number;
+}
+
+let historyClass: ReturnType<typeof fakegato> | undefined;
+/** fakegato-history must be initialised once per Homebridge API instance. */
+function historyConstructor(api: API): ReturnType<typeof fakegato> {
+  historyClass ??= fakegato(api);
+  return historyClass;
 }
 
 /** First cycle shortly after start, so the Matter controller has a moment to come online. */
@@ -63,6 +74,7 @@ export class VthermoAccessory {
   private sourceStates: ThermostatStatus["sources"] = [];
   private readonly contactStates = new Map<string, { open: boolean; at: number }>();
 
+  private history?: { addEntry(entry: Record<string, number>): void };
   private faultMessage?: string;
   private lastWarning?: string;
 
@@ -97,6 +109,31 @@ export class VthermoAccessory {
 
     this.configureAccessoryInformation();
     this.configureThermostatService();
+    if (this.platform.historyEnabled) {
+      this.configureHistory();
+    }
+  }
+
+  /** Eve app history (temperature, target, heating) via fakegato-history. */
+  private configureHistory(): void {
+    try {
+      const directory = join(this.platform.api.user.storagePath(), "vthermo-history");
+      mkdirSync(directory, { recursive: true });
+      const History = historyConstructor(this.platform.api);
+      this.history = new History("thermo", this.accessory, {
+        storage: "fs",
+        path: directory,
+        filename: `vthermo-${this.config.id}.json`,
+        log: {
+          debug: () => undefined,
+          info: () => undefined,
+          warn: (...args: unknown[]) => this.platform.log.warn(`[${this.config.name}] Eve history: ${args.join(" ")}`),
+          error: (...args: unknown[]) => this.platform.log.warn(`[${this.config.name}] Eve history: ${args.join(" ")}`),
+        },
+      });
+    } catch (error) {
+      this.platform.log.warn(`[${this.config.name}] Eve history unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   start(): void {
@@ -230,8 +267,13 @@ export class VthermoAccessory {
   // Control cycle
   // ---------------------------------------------------------------------------------------------
 
-  /** Run a cycle as soon as possible without blocking the caller (HomeKit set handlers). */
-  private requestCycle(): void {
+  /** References whose changes should trigger an immediate cycle (window sensors, relay). */
+  get watchedReferences(): MatterEndpointReference[] {
+    return [...this.config.contactSensors, this.config.switchTarget];
+  }
+
+  /** Run a cycle as soon as possible without blocking the caller (HomeKit set handlers, subscriptions). */
+  requestCycle(): void {
     if (this.cycleRunning) {
       this.cyclePending = true;
       return;
@@ -393,6 +435,12 @@ export class VthermoAccessory {
 
     if (temperatures.length) {
       this.persistState();
+      this.history?.addEntry({
+        time: Math.round(now / 1000),
+        currentTemp: this.currentTemperature,
+        setTemp: this.targetTemperature,
+        valvePosition: this.heatDemand ? 100 : 0,
+      });
     }
 
     const fault = temperatureError ?? relayError;

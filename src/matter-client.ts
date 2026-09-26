@@ -454,6 +454,50 @@ export class MatterControllerClient {
     );
   }
 
+  /**
+   * Experimental: asks the node to report changes of these endpoints (window sensors, relay) so the
+   * thermostat can react within a second instead of at the next poll. matter.js keeps the
+   * subscription alive and re-establishes it after reconnects. Polling continues regardless, so a
+   * failing subscription only costs speed. Returns a function that cancels the subscription.
+   */
+  async subscribeToChanges(
+    nodeId: string,
+    references: MatterEndpointReference[],
+    onChange: (key: string) => void,
+  ): Promise<() => void> {
+    const byPath = new Map(references.map((reference) => {
+      const { clusterId, attributeId } = CLUSTER_ATTRIBUTES[reference.clusterType];
+      return [`${reference.endpointId}/${clusterId}/${attributeId}`, referenceKey(reference)];
+    }));
+
+    const node = await this.guard.run(nodeId, `preparing the subscription for node ${nodeId}`, () => this.getStartedNode(nodeId));
+    const request = {
+      keepSubscriptions: true,
+      isFabricFiltered: true,
+      interactionModelRevision: SessionParameters.defaults.interactionModelRevision,
+      attributeRequests: [...byPath.keys()].map((path) => {
+        const [endpointId, clusterId, attributeId] = path.split("/").map(Number);
+        return { endpointId, clusterId, attributeId };
+      }),
+      minIntervalFloor: Seconds(1),
+      maxIntervalCeiling: Seconds(60),
+      sustain: true,
+      updated: async (data: AsyncIterable<Iterable<ReadReport>>) => {
+        for await (const chunk of data) {
+          for (const report of chunk) {
+            const key = byPath.get(`${Number(report.path?.endpointId)}/${Number(report.path?.clusterId)}/${Number(report.path?.attributeId)}`);
+            if (key && report.kind === "attr-value") {
+              onChange(key);
+            }
+          }
+        }
+      },
+    };
+
+    const subscription = await node.interaction.subscribe(request as never) as unknown as { close(): void };
+    return () => subscription.close();
+  }
+
   isNodeBlocked(nodeId: string): boolean {
     return this.guard.isBlocked(nodeId);
   }
@@ -567,8 +611,11 @@ export class MatterControllerClient {
           }
         }
 
+        this.rememberNode(node);
         return {
           ...base,
+          // The name is only known reliably after the structure read.
+          name: inventory.nodeName,
           addresses: inventory.addresses,
           reachable: true,
           endpointsDiscovered: inventory.endpointsDiscovered,

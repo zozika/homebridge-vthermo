@@ -32,7 +32,7 @@ test("every data-i18n key used in the page exists", async () => {
 });
 
 test("every warning code produced by the plugin is translated", async () => {
-  const codes = ["matterOnly", "bridgeHint", "storageShared", "cachedSnapshot", "controllerBusy"];
+  const codes = ["matterOnly", "bridgeHint", "storageShared", "cachedSnapshot", "controllerBusy", "viaBridge"];
   for (const code of codes) {
     assert.ok(`warning.${code}` in en, code);
   }

@@ -51,6 +51,10 @@
       "app.platformName": "Platform name",
       "app.verbose": "Detailed logging",
       "app.verboseHelp": "Show detailed runtime logs in Homebridge",
+      "app.instant": "Instant updates (experimental)",
+      "app.instantHelp": "Window sensors and relays report changes immediately via Matter subscriptions instead of waiting for the next check. Polling keeps running as a fallback.",
+      "app.history": "Eve history",
+      "app.historyHelp": "Record temperature, target and heating for graphs in the Eve app.",
 
       "status.loadingCache": "Showing the last saved scan, refreshing…",
       "status.scanning": "Scanning the Matter network… large bridges can take 1–2 minutes. You can keep editing meanwhile.",
@@ -65,6 +69,7 @@
       "warning.matterOnly": "Only Matter devices and Matter bridges can appear here. Apple Home-only accessories stay invisible to Homebridge.",
       "warning.bridgeHint": "For bridges such as the Aqara Hub M2, pair the bridge itself first. Its child devices then appear in the thermostat lists.",
       "warning.storageShared": "The Matter controller state is stored in Homebridge storage and shared between this page and the running plugin.",
+      "warning.viaBridge": "Connected to the running Vthermo plugin: you can pair and remove devices without stopping it.",
       "warning.cachedSnapshot": "This is the last saved scan. A live scan is running in the background.",
       "warning.controllerBusy": "The running Vthermo child bridge is using the Matter controller, so this page shows the last scan from {time}. To pair or remove devices, stop the Vthermo child bridge, reload this page, then start it again.",
 
@@ -184,6 +189,10 @@
       "app.platformName": "Platform neve",
       "app.verbose": "Részletes naplózás",
       "app.verboseHelp": "Részletes futási napló a Homebridge-ben",
+      "app.instant": "Azonnali frissítés (kísérleti)",
+      "app.instantHelp": "Az ablakérzékelők és relék Matter feliratkozással azonnal jelzik a változást, nem kell a következő ellenőrzésig várni. A lekérdezés tartalékként tovább fut.",
+      "app.history": "Eve előzmények",
+      "app.historyHelp": "Hőmérséklet, cél és fűtés rögzítése grafikonokhoz az Eve appban.",
 
       "status.loadingCache": "Az utolsó mentett keresés látható, frissítés folyamatban…",
       "status.scanning": "Matter hálózat keresése… nagy bridge-eknél 1–2 perc is lehet. Közben nyugodtan szerkesztheted a beállításokat.",
@@ -198,6 +207,7 @@
       "warning.matterOnly": "Itt csak Matter eszközök és Matter bridge-ek jelenhetnek meg. A csak Apple Home-ban lévő eszközöket a Homebridge nem látja.",
       "warning.bridgeHint": "Bridge-eknél (pl. Aqara Hub M2) először magát a bridge-et párosítsd, utána a hozzá kapcsolt eszközök megjelennek a termosztát listákban.",
       "warning.storageShared": "A Matter vezérlő állapota a Homebridge tárolóban van, ezt az oldal és a futó plugin közösen használja.",
+      "warning.viaBridge": "Kapcsolódva a futó Vthermo pluginhoz: az eszközök párosítása és törlése leállítás nélkül is működik.",
       "warning.cachedSnapshot": "Ez az utolsó mentett keresés. Az élő keresés a háttérben fut.",
       "warning.controllerBusy": "A futó Vthermo child bridge használja a Matter vezérlőt, ezért az oldal a {time} időpontban mentett keresést mutatja. Párosításhoz vagy törléshez állítsd le a Vthermo child bridge-et, töltsd újra az oldalt, majd indítsd újra.",
 
