@@ -659,12 +659,12 @@ export class MatterControllerClient {
     };
   }
 
-  /** Reads the whole node once so node.endpoints gets populated without an auto-subscription. */
+  /**
+   * Reads the whole node so node.endpoints reflects every endpoint without an auto-subscription.
+   * Always done for the settings-page inventory: right after commissioning matter.js knows only
+   * part of the structure, and bridges add or remove bridged devices over time.
+   */
   private async refreshNodeStructure(node: ClientNode): Promise<void> {
-    if ([...node.endpoints].some((endpoint) => endpoint.number !== 0)) {
-      return;
-    }
-
     const readRequest = {
       includeKnownVersions: true,
       isFabricFiltered: true,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.2
+
+### Fixed
+- After (re)pairing a Matter bridge only part of its devices appeared on the settings page. The
+  settings-page scan now always reads the full node structure instead of skipping it when some
+  endpoints were already known.
+
 ## 2.0.1
 
 ### Fixed
