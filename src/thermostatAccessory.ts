@@ -112,6 +112,10 @@ export class VthermoAccessory {
       this.service.addOptionalCharacteristic(Characteristic.ConfiguredName);
     }
     this.service.setCharacteristic(Characteristic.ConfiguredName, this.config.name);
+    // StatusFault is not in HAP's optional list for Thermostat; declare it so HAP does not warn.
+    if (!this.service.testCharacteristic(Characteristic.StatusFault)) {
+      this.service.addOptionalCharacteristic(Characteristic.StatusFault);
+    }
 
     // All getters answer from memory. Matter traffic never blocks HomeKit.
     this.service.getCharacteristic(Characteristic.CurrentTemperature)
