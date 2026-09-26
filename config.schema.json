@@ -1,0 +1,303 @@
+{
+  "pluginAlias": "VthermoPlatform",
+  "pluginType": "platform",
+  "singular": true,
+  "customUi": true,
+  "customUiPath": "./homebridge-ui",
+  "strictValidation": false,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Platform Name",
+        "type": "string",
+        "default": "Vthermo Platform"
+      },
+      "language": {
+        "title": "Settings page language",
+        "type": "string",
+        "enum": [
+          "auto",
+          "en",
+          "hu"
+        ],
+        "default": "auto"
+      },
+      "enableVerboseLogging": {
+        "title": "Enable Detailed Logging",
+        "type": "boolean",
+        "default": false
+      },
+      "nodeAddressOverrides": {
+        "title": "Fixed Matter node addresses",
+        "description": "Optional. Use only when mDNS discovery cannot find a paired node (e.g. different subnet).",
+        "type": "array",
+        "default": [],
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nodeId",
+            "address"
+          ],
+          "properties": {
+            "nodeId": {
+              "type": "string"
+            },
+            "address": {
+              "type": "string",
+              "description": "IPv4/IPv6 address, optionally with :port (default 5540)."
+            }
+          }
+        }
+      },
+      "thermostats": {
+        "title": "Thermostats",
+        "type": "array",
+        "default": [],
+        "items": {
+          "$ref": "#/definitions/thermostatConfig"
+        }
+      },
+      "temperatureSource": {
+        "$ref": "#/definitions/matterReference"
+      },
+      "temperatureSources": {
+        "type": "array",
+        "default": [],
+        "items": {
+          "$ref": "#/definitions/matterReference"
+        }
+      },
+      "temperatureAggregation": {
+        "type": "string",
+        "enum": [
+          "average",
+          "minimum",
+          "maximum"
+        ],
+        "default": "average"
+      },
+      "switchTarget": {
+        "$ref": "#/definitions/matterReference"
+      },
+      "contactSensors": {
+        "type": "array",
+        "default": [],
+        "items": {
+          "$ref": "#/definitions/matterReference"
+        }
+      },
+      "hysteresis": {
+        "type": "number",
+        "default": 0.5,
+        "minimum": 0.1,
+        "maximum": 5
+      },
+      "checkIntervalSeconds": {
+        "type": "integer",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 3600
+      },
+      "temperatureRefreshIntervalMinutes": {
+        "type": "integer",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 180,
+        "description": "Deprecated since 2.0.0 and ignored: temperatures are read on every control cycle."
+      },
+      "relayRetryEnabled": {
+        "type": "boolean",
+        "default": false
+      },
+      "relayRetryDelayMinutes": {
+        "type": "integer",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 180
+      },
+      "defaultTargetTemperature": {
+        "type": "number",
+        "default": 21,
+        "minimum": 5,
+        "maximum": 35
+      },
+      "minTargetTemperature": {
+        "type": "number",
+        "default": 10,
+        "minimum": 5,
+        "maximum": 35
+      },
+      "maxTargetTemperature": {
+        "type": "number",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 35
+      }
+    },
+    "definitions": {
+      "thermostatConfig": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "default": "Virtual Thermostat"
+          },
+          "temperatureSource": {
+            "$ref": "#/definitions/matterReference"
+          },
+          "temperatureSources": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "$ref": "#/definitions/matterReference"
+            }
+          },
+          "temperatureAggregation": {
+            "type": "string",
+            "enum": [
+              "average",
+              "minimum",
+              "maximum"
+            ],
+            "default": "average"
+          },
+          "switchTarget": {
+            "$ref": "#/definitions/matterReference"
+          },
+          "contactSensors": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "$ref": "#/definitions/matterReference"
+            }
+          },
+          "hysteresis": {
+            "type": "number",
+            "default": 0.5,
+            "minimum": 0.1,
+            "maximum": 5
+          },
+          "checkIntervalSeconds": {
+            "type": "integer",
+            "default": 30,
+            "minimum": 5,
+            "maximum": 3600
+          },
+          "temperatureRefreshIntervalMinutes": {
+            "type": "integer",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 180,
+            "description": "Deprecated since 2.0.0 and ignored: temperatures are read on every control cycle."
+          },
+          "relayRetryEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "relayRetryDelayMinutes": {
+            "type": "integer",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 180
+          },
+          "defaultTargetTemperature": {
+            "type": "number",
+            "default": 21,
+            "minimum": 5,
+            "maximum": 35
+          },
+          "minTargetTemperature": {
+            "type": "number",
+            "default": 10,
+            "minimum": 5,
+            "maximum": 35
+          },
+          "maxTargetTemperature": {
+            "type": "number",
+            "default": 30,
+            "minimum": 5,
+            "maximum": 35
+          }
+        }
+      },
+      "matterReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nodeId",
+          "deviceIdentifier",
+          "endpointId",
+          "clusterType",
+          "endpointName",
+          "deviceName",
+          "nodeName"
+        ],
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "deviceIdentifier": {
+            "type": "string"
+          },
+          "endpointId": {
+            "type": "number"
+          },
+          "clusterType": {
+            "type": "string",
+            "enum": [
+              "temperatureMeasurement",
+              "onOff",
+              "booleanState"
+            ]
+          },
+          "endpointName": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "uniqueId": {
+            "type": "string"
+          },
+          "serialNumber": {
+            "type": "string"
+          },
+          "parentEndpointId": {
+            "type": "number"
+          },
+          "parentEndpointName": {
+            "type": "string"
+          },
+          "deviceType": {
+            "type": "number"
+          },
+          "deviceTypes": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "vendorId": {
+            "type": "number"
+          },
+          "productId": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  }
+}

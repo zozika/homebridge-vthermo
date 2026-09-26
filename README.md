@@ -1,0 +1,136 @@
+# homebridge-vthermo
+
+A virtual heating thermostat for [Homebridge](https://homebridge.io) (v1.8+ and v2) that uses
+**Matter** devices: it reads Matter temperature sensors (and optional door/window sensors) and
+switches a Matter On/Off relay or plug. The thermostat shows up in Apple Home like a normal one.
+
+> 🇭🇺 Magyar leírás lent: [Magyarul](#magyarul)
+
+## Features
+
+- Multiple thermostats in one platform
+- One or more temperature sources per thermostat, combined as average, minimum or maximum
+- If a source does not answer, the others are used; the last good reading is kept for 10 minutes
+- Heating pauses while any selected door/window sensor is open
+- Hysteresis band and a configurable check interval
+- Several thermostats can share one relay (e.g. one boiler): it stays on while any of them needs heat
+- Optional relay retry after a cut-out (relay switched itself off while heat was still needed)
+- Built-in Matter controller: pair Matter devices or bridges (e.g. Aqara Hub M2) from the settings page
+- Settings page in English or Hungarian
+- Fail-safe: if no temperature can be read, heating is switched off and the thermostat shows a fault in Apple Home
+
+## Install
+
+From the Homebridge UI search for `homebridge-vthermo`, or from a local package:
+
+```bash
+npm install -g ./homebridge-vthermo-2.0.0.tgz
+```
+
+Running the plugin as a **child bridge** is recommended.
+
+## Setup
+
+1. Open the Vthermo plugin settings in the Homebridge UI.
+2. Pair your Matter device or bridge: pick it from *Discovered Matter nodes* or use *Pair by Matter code*
+   (Apple Home → device → *Turn On Pairing Mode* gives you a code for an extra controller).
+3. Add a thermostat, then pick its temperature sources, the relay and optional window sensors.
+4. Save and restart the Vthermo child bridge.
+
+**Pairing while the plugin is running:** the running child bridge owns the Matter controller.
+The settings page then shows the last saved scan and pairing buttons are disabled.
+To pair or remove a device, stop the Vthermo child bridge, reload the settings page, pair, then start it again.
+
+## Troubleshooting
+
+**“… is not reachable” / `Resume failed … Operation timed out`**: Homebridge cannot reach the
+Matter device at its stored address. Usually the device got a new IP address or it is on a
+different subnet/VLAN than Homebridge (mDNS discovery does not cross subnets). Check from the
+Homebridge host:
+
+```bash
+ping <device-ip>
+```
+
+```bash
+avahi-browse -rt _matter._tcp
+```
+
+Fix it with a DHCP reservation for the device. If it lives in another subnet on purpose, enable
+an mDNS reflector on your router and allow routing, or set a **fixed address** for the node in the
+settings page (`nodeAddressOverrides`).
+
+**Detailed logging**: turn on *Detailed logging* in the settings. For deep Matter protocol traces
+start Homebridge with `MATTER_LOG_LEVEL=debug`.
+
+## Configuration
+
+The settings page writes the config for you. Reference:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `language` | `auto` | Settings page language: `auto`, `en`, `hu` |
+| `enableVerboseLogging` | `false` | Detailed runtime logs |
+| `nodeAddressOverrides` | `[]` | `[{ "nodeId": "...", "address": "192.168.1.68:5540" }]` fixed addresses for nodes mDNS cannot find |
+| `thermostats[].name` | | Name in Apple Home |
+| `thermostats[].temperatureSources` | | Matter temperature endpoints (selected in the UI) |
+| `thermostats[].temperatureAggregation` | `average` | `average`, `minimum`, `maximum` |
+| `thermostats[].switchTarget` | | Matter On/Off endpoint (relay, plug) |
+| `thermostats[].contactSensors` | `[]` | Matter contact sensors that pause heating while open |
+| `thermostats[].hysteresis` | `0.5` | Total band in °C (0.1–5) |
+| `thermostats[].checkIntervalSeconds` | `30` | Control cycle interval (5–3600 s) |
+| `thermostats[].relayRetryEnabled` | `false` | Switch the relay on again after a cut-out |
+| `thermostats[].relayRetryDelayMinutes` | `5` | Wait time before the retry (1–180 min) |
+| `thermostats[].defaultTargetTemperature` | `21` | Initial target |
+| `thermostats[].minTargetTemperature` / `maxTargetTemperature` | `10` / `30` | Allowed target range (5–35 °C) |
+
+Matter controller state is stored in the Homebridge storage folder under `vthermo-matter/`.
+
+## Development
+
+```bash
+npm install
+npm test
+npm pack
+```
+
+---
+
+## Magyarul
+
+Virtuális fűtési termosztát Homebridge-hez (v1.8+ és v2), ami **Matter** eszközökkel dolgozik:
+Matter hőmérséklet-érzékelőket (és opcionálisan ajtó/ablak érzékelőket) olvas, és egy Matter
+On/Off relét vagy konnektort kapcsol. Az Apple Home-ban normál termosztátként jelenik meg.
+
+### Tudja
+
+- Több termosztát egy platformon
+- Termosztátonként több hőmérséklet-forrás (átlag, minimum vagy maximum)
+- Ha egy forrás nem válaszol, a többit használja; az utolsó jó értéket 10 percig megtartja
+- Nyitott ajtó/ablak esetén a fűtés szünetel
+- Hiszterézis és állítható ellenőrzési időköz
+- Több termosztát használhatja ugyanazt a relét (pl. egy kazán): addig marad bekapcsolva, amíg bármelyiknek fűtés kell
+- Opcionális relé újrakapcsolás, ha a relé magától kikapcsol (pl. kazánvédelem)
+- Beépített Matter vezérlő: Matter eszközök vagy bridge-ek (pl. Aqara Hub M2) párosítása a beállítások oldalon
+- Magyar vagy angol beállítások oldal
+- Biztonság: ha egyik hőmérséklet sem olvasható, kikapcsolja a fűtést és hibát jelez az Apple Home-ban
+
+### Beállítás
+
+1. Nyisd meg a Vthermo plugin beállításait a Homebridge UI-ban.
+2. Párosítsd a Matter eszközt vagy bridge-et: válaszd ki a *Talált Matter eszközök* közül, vagy használd a *Párosítás Matter kóddal* részt
+   (Apple Home → eszköz → *Párosítási mód bekapcsolása* ad kódot egy további vezérlőhöz).
+3. Adj hozzá termosztátot, és válaszd ki a hőmérséklet-forrásokat, a relét és az opcionális ablakérzékelőket.
+4. Mentsd el, és indítsd újra a Vthermo child bridge-et.
+
+**Párosítás futó plugin mellett:** a futó child bridge használja a Matter vezérlőt, ilyenkor a
+beállítások oldal az utolsó mentett keresést mutatja, a párosítás gombok tiltva vannak. Párosításhoz
+állítsd le a Vthermo child bridge-et, töltsd újra az oldalt, párosíts, majd indítsd újra.
+
+### Hibaelhárítás
+
+**„… is not reachable” / `Resume failed … Operation timed out`**: a Homebridge nem éri el a Matter
+eszközt a tárolt címen. Általában új IP címet kapott, vagy más alhálózaton/VLAN-on van, mint a
+Homebridge (az mDNS nem megy át alhálózatok között). Ellenőrizd a Homebridge gépről a `ping` és az
+`avahi-browse -rt _matter._tcp` paranccsal. Megoldás: fix DHCP cím az eszköznek, mDNS reflektor a
+routeren, vagy **fix cím** megadása a beállítások oldalon.

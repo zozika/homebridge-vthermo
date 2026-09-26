@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vthermo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 20px;
+        display: grid;
+        gap: 20px;
+      }
+
+      section {
+        border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas);
+        border-radius: 6px;
+        padding: 16px;
+        background: color-mix(in srgb, Canvas 94%, CanvasText 6%);
+      }
+
+      h1, h2, h3, p {
+        margin: 0;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .stack > *, .row > *, label {
+        min-width: 0;
+      }
+
+      .toolbar, .section-head, .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .toolbar {
+        align-items: flex-start;
+      }
+
+      .grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .thermostat {
+        border: 1px solid color-mix(in srgb, CanvasText 12%, Canvas);
+        border-radius: 6px;
+        padding: 14px;
+        display: grid;
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 0.95rem;
+      }
+
+      input, select, button {
+        font: inherit;
+        border-radius: 6px;
+      }
+
+      input, select {
+        width: 100%;
+        min-width: 0;
+        padding: 8px 10px;
+        border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas);
+        background: Canvas;
+        color: CanvasText;
+      }
+
+      input[aria-invalid="true"] {
+        border-color: crimson;
+      }
+
+      button {
+        padding: 8px 12px;
+        border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas);
+        background: color-mix(in srgb, Canvas 88%, CanvasText 12%);
+        color: CanvasText;
+        cursor: pointer;
+      }
+
+      button.danger {
+        background: color-mix(in srgb, #d24 15%, Canvas);
+      }
+
+      button.danger.armed {
+        background: color-mix(in srgb, #d24 45%, Canvas);
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+
+      .muted {
+        color: color-mix(in srgb, CanvasText 65%, Canvas);
+        font-size: 0.92rem;
+      }
+
+      .status {
+        min-height: 1.25rem;
+      }
+
+      .status.error {
+        color: crimson;
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .list-item {
+        border: 1px solid color-mix(in srgb, CanvasText 12%, Canvas);
+        border-radius: 6px;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas);
+      }
+
+      .pill.ok {
+        background: color-mix(in srgb, #1f9d55 18%, Canvas);
+      }
+
+      .pill.warn {
+        background: color-mix(in srgb, #c38c00 18%, Canvas);
+      }
+
+      .notice {
+        border-left: 3px solid #c38c00;
+        padding: 6px 10px;
+        background: color-mix(in srgb, #c38c00 10%, Canvas);
+        border-radius: 4px;
+      }
+
+      .warning-list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 4px;
+      }
+
+      .endpoint-field {
+        display: grid;
+        gap: 6px;
+        align-content: start;
+      }
+
+      .endpoint-picker {
+        border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas);
+        border-radius: 6px;
+        display: grid;
+        gap: 6px;
+        max-height: 260px;
+        overflow: auto;
+        padding: 8px;
+        background: Canvas;
+      }
+
+      .endpoint-choice {
+        border: 1px solid color-mix(in srgb, CanvasText 12%, Canvas);
+        border-radius: 6px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 8px;
+        padding: 8px;
+      }
+
+      .endpoint-choice:has(input:checked) {
+        border-color: color-mix(in srgb, #1f9d55 45%, CanvasText);
+        background: color-mix(in srgb, #1f9d55 13%, Canvas);
+      }
+
+      .endpoint-choice input {
+        margin: 3px 0 0;
+        min-width: auto;
+        width: auto;
+      }
+
+      .endpoint-choice-body {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .endpoint-choice-label, .endpoint-choice-meta {
+        overflow-wrap: anywhere;
+      }
+
+      .endpoint-choice-meta, .count, .help {
+        color: color-mix(in srgb, CanvasText 58%, Canvas);
+        font-size: 0.8rem;
+        line-height: 1.35;
+      }
+
+      .field-title {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        justify-content: space-between;
+      }
+
+      .count {
+        white-space: nowrap;
+      }
+
+      .field-error {
+        color: crimson;
+        font-size: 0.82rem;
+      }
+
+      .toggle-option {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .toggle-option input {
+        width: auto;
+        min-width: auto;
+      }
+
+      .lang-select {
+        width: auto;
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 12px;
+        }
+
+        .row {
+          align-items: stretch;
+        }
+
+        .row input, .row button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="stack">
+      <div class="toolbar">
+        <div class="stack">
+          <h1>Vthermo</h1>
+          <p class="muted" data-i18n="app.subtitle"></p>
+        </div>
+        <div class="row">
+          <label class="toggle-option">
+            <span data-i18n="app.language"></span>
+            <select id="language" class="lang-select">
+              <option value="auto" data-i18n="app.language.auto"></option>
+              <option value="en">English</option>
+              <option value="hu">Magyar</option>
+            </select>
+          </label>
+          <button id="refresh" type="button" data-i18n="app.refresh"></button>
+          <button id="save" type="button" data-i18n="app.save"></button>
+        </div>
+      </div>
+      <label>
+        <span data-i18n="app.platformName"></span>
+        <input id="platform-name" type="text" />
+      </label>
+      <label>
+        <span data-i18n="app.verbose"></span>
+        <span class="toggle-option">
+          <input id="verbose-logging" type="checkbox" />
+          <span data-i18n="app.verboseHelp"></span>
+        </span>
+      </label>
+      <p id="status" class="status muted" role="status"></p>
+      <ul id="warnings" class="warning-list muted"></ul>
+    </section>
+
+    <section class="stack">
+      <h2 data-i18n="paired.title"></h2>
+      <div id="paired-nodes" class="list"></div>
+    </section>
+
+    <section class="stack">
+      <h2 data-i18n="discovered.title"></h2>
+      <div id="discovered-nodes" class="list"></div>
+    </section>
+
+    <section class="stack">
+      <div class="section-head">
+        <h2 data-i18n="thermostats.title"></h2>
+        <button id="add-thermostat" type="button" data-i18n="thermostats.add"></button>
+      </div>
+      <div id="thermostats" class="stack"></div>
+    </section>
+
+    <script src="i18n.js"></script>
+    <script>
+      const PLATFORM = "VthermoPlatform";
+      const NUMBER_FIELDS = ["hysteresis", "checkIntervalSeconds", "relayRetryDelayMinutes", "defaultTargetTemperature", "minTargetTemperature", "maxTargetTemperature"];
+      const DEFAULTS = {
+        temperatureAggregation: "average",
+        hysteresis: 0.5,
+        checkIntervalSeconds: 30,
+        relayRetryEnabled: false,
+        relayRetryDelayMinutes: 5,
+        defaultTargetTemperature: 21,
+        minTargetTemperature: 10,
+        maxTargetTemperature: 30,
+      };
+
+      const state = {
+        config: { platform: PLATFORM, name: "Vthermo Platform", language: "auto", enableVerboseLogging: false, nodeAddressOverrides: [], thermostats: [] },
+        snapshot: { discoveredNodes: [], pairedNodes: [], temperatureSources: [], switchTargets: [], contactSensors: [], warnings: [] },
+        controllerBusy: false,
+        homebridgeLang: "en",
+        lang: "en",
+        armed: undefined,
+        status: undefined,
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const elements = {
+        language: $("language"),
+        platformName: $("platform-name"),
+        verboseLogging: $("verbose-logging"),
+        refresh: $("refresh"),
+        save: $("save"),
+        status: $("status"),
+        warnings: $("warnings"),
+        pairedNodes: $("paired-nodes"),
+        discoveredNodes: $("discovered-nodes"),
+        thermostats: $("thermostats"),
+        addThermostat: $("add-thermostat"),
+      };
+
+      // ---------------------------------------------------------------------------------------
+      // i18n
+      // ---------------------------------------------------------------------------------------
+
+      function resolveLanguage() {
+        const choice = state.config.language;
+        if (choice === "en" || choice === "hu") {
+          return choice;
+        }
+        return String(state.homebridgeLang || navigator.language || "en").toLowerCase().startsWith("hu") ? "hu" : "en";
+      }
+
+      function t(key, params = {}) {
+        const dictionary = window.VTHERMO_I18N[state.lang] ?? window.VTHERMO_I18N.en;
+        const template = dictionary[key] ?? window.VTHERMO_I18N.en[key] ?? key;
+        return template.replace(/\{(\w+)\}/g, (_, name) => (params[name] ?? `{${name}}`));
+      }
+
+      function translateStatic() {
+        document.documentElement.lang = state.lang;
+        for (const element of document.querySelectorAll("[data-i18n]")) {
+          element.textContent = t(element.dataset.i18n);
+        }
+      }
+
+      function formatTime(iso) {
+        if (!iso) {
+          return "?";
+        }
+        const date = new Date(iso);
+        return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(state.lang === "hu" ? "hu-HU" : "en-GB");
+      }
+
+      /** Server errors carry a code; translate it when we know it. */
+      function errorText(error) {
+        const code = error?.error?.code;
+        if (code && window.VTHERMO_I18N.en[`error.${code}`]) {
+          return t(`error.${code}`);
+        }
+        return error?.message ?? String(error);
+      }
+
+      // ---------------------------------------------------------------------------------------
+      // Helpers
+      // ---------------------------------------------------------------------------------------
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function referenceKey(reference) {
+        return `${reference.nodeId}:${reference.endpointId}:${reference.clusterType}`;
+      }
+
+      function sameReference(left, right) {
+        return !!left && !!right && referenceKey(left) === referenceKey(right);
+      }
+
+      function serializeReference(reference) {
+        return encodeURIComponent(JSON.stringify(reference));
+      }
+
+      function parseReference(value) {
+        if (!value) {
+          return undefined;
+        }
+        try {
+          return JSON.parse(decodeURIComponent(value));
+        } catch {
+          return undefined;
+        }
+      }
+
+      function formatHex(value) {
+        const numeric = Number(value);
+        return value !== undefined && Number.isFinite(numeric) ? `0x${numeric.toString(16)}` : undefined;
+      }
+
+      function isValidAddress(value) {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return true;
+        }
+        const ipv4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}(:\d{1,5})?$/;
+        const ipv6 = /^\[?[0-9a-fA-F:]+(%[\w.-]+)?\]?(:\d{1,5})?$/;
+        const port = /^(?:\[.*\]|[^:]+):(\d+)$/.exec(trimmed)?.[1];
+        if (port !== undefined && (Number(port) < 1 || Number(port) > 65535)) {
+          return false;
+        }
+        return ipv4.test(trimmed) || (trimmed.includes(":") && ipv6.test(trimmed) && trimmed.split(":").length > 2);
+      }
+
+      function createThermostatId() {
+        return `thermostat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+
+      function createThermostat(index = state.config.thermostats.length) {
+        return {
+          id: createThermostatId(),
+          name: t("thermostats.defaultName", { n: index + 1 }),
+          temperatureSources: [],
+          switchTarget: undefined,
+          contactSensors: [],
+          ...DEFAULTS,
+        };
+      }
+
+      function numberOr(value, fallback) {
+        const numeric = Number(value);
+        return value !== "" && value !== null && value !== undefined && Number.isFinite(numeric) ? numeric : fallback;
+      }
+
+      function normalizeThermostat(raw, index) {
+        return {
+          id: typeof raw?.id === "string" && raw.id ? raw.id : createThermostatId(),
+          name: typeof raw?.name === "string" && raw.name.trim() ? raw.name.trim() : t("thermostats.defaultName", { n: index + 1 }),
+          temperatureSources: Array.isArray(raw?.temperatureSources)
+            ? raw.temperatureSources.filter(Boolean)
+            : raw?.temperatureSource ? [raw.temperatureSource] : [],
+          temperatureAggregation: ["average", "minimum", "maximum"].includes(raw?.temperatureAggregation) ? raw.temperatureAggregation : DEFAULTS.temperatureAggregation,
+          switchTarget: raw?.switchTarget,
+          contactSensors: Array.isArray(raw?.contactSensors) ? raw.contactSensors.filter(Boolean) : [],
+          hysteresis: numberOr(raw?.hysteresis, DEFAULTS.hysteresis),
+          checkIntervalSeconds: numberOr(raw?.checkIntervalSeconds, DEFAULTS.checkIntervalSeconds),
+          relayRetryEnabled: typeof raw?.relayRetryEnabled === "boolean" ? raw.relayRetryEnabled : DEFAULTS.relayRetryEnabled,
+          relayRetryDelayMinutes: numberOr(raw?.relayRetryDelayMinutes, DEFAULTS.relayRetryDelayMinutes),
+          defaultTargetTemperature: numberOr(raw?.defaultTargetTemperature, DEFAULTS.defaultTargetTemperature),
+          minTargetTemperature: numberOr(raw?.minTargetTemperature, DEFAULTS.minTargetTemperature),
+          maxTargetTemperature: numberOr(raw?.maxTargetTemperature, DEFAULTS.maxTargetTemperature),
+        };
+      }
+
+      function normalizeConfig(block) {
+        const thermostats = Array.isArray(block?.thermostats)
+          ? block.thermostats.map(normalizeThermostat)
+          : [normalizeThermostat(block ?? {}, 0)].filter((thermostat) => thermostat.temperatureSources.length || thermostat.switchTarget);
+
+        return {
+          platform: PLATFORM,
+          name: typeof block?.name === "string" && block.name.trim() ? block.name.trim() : "Vthermo Platform",
+          language: ["auto", "en", "hu"].includes(block?.language) ? block.language : "auto",
+          enableVerboseLogging: block?.enableVerboseLogging === true,
+          nodeAddressOverrides: Array.isArray(block?.nodeAddressOverrides)
+            ? block.nodeAddressOverrides.filter((entry) => entry && typeof entry.nodeId === "string" && typeof entry.address === "string")
+            : [],
+          thermostats,
+        };
+      }
+
+      function buildConfigBlock() {
+        return {
+          platform: PLATFORM,
+          name: elements.platformName.value.trim() || "Vthermo Platform",
+          language: state.config.language,
+          enableVerboseLogging: elements.verboseLogging.checked,
+          nodeAddressOverrides: state.config.nodeAddressOverrides.filter((entry) => entry.address.trim()),
+          thermostats: state.config.thermostats,
+        };
+      }
+
+      function getAddressOverride(nodeId) {
+        return state.config.nodeAddressOverrides.find((entry) => entry.nodeId === nodeId)?.address ?? "";
+      }
+
+      function setAddressOverride(nodeId, address) {
+        const others = state.config.nodeAddressOverrides.filter((entry) => entry.nodeId !== nodeId);
+        state.config.nodeAddressOverrides = address.trim() ? [...others, { nodeId, address: address.trim() }] : others;
+      }
+
+      // ---------------------------------------------------------------------------------------
+      // Status and config sync
+      // ---------------------------------------------------------------------------------------
+
+      function setStatus(key, params = {}, isError = false) {
+        state.status = { key, params, isError };
+        renderStatus();
+      }
+
+      function setErrorStatus(error) {
+        const message = errorText(error);
+        state.status = { text: message, isError: true };
+        renderStatus();
+        window.homebridge.toast.error(message);
+      }
+
+      function renderStatus() {
+        const status = state.status;
+        elements.status.textContent = !status ? "" : status.text ?? t(status.key, status.params);
+        elements.status.classList.toggle("error", !!status?.isError);
+      }
+
+      let configUpdateTimer;
+      let configUpdateQueue = Promise.resolve();
+
+      function pushConfig() {
+        const block = buildConfigBlock();
+        configUpdateQueue = configUpdateQueue
+          .catch(() => undefined)
+          .then(() => window.homebridge.updatePluginConfig([block]));
+        return configUpdateQueue;
+      }
+
+      function markDirty() {
+        window.homebridge.enableSaveButton();
+        setStatus("status.unsaved");
+        clearTimeout(configUpdateTimer);
+        configUpdateTimer = setTimeout(() => {
+          pushConfig().catch(setErrorStatus);
+        }, 250);
+      }
+
+      async function saveConfig() {
+        clearTimeout(configUpdateTimer);
+        window.homebridge.showSpinner();
+        try {
+          await pushConfig();
+          await window.homebridge.savePluginConfig();
+          window.homebridge.disableSaveButton();
+          setStatus("status.saved");
+          window.homebridge.toast.success(t("status.saved"));
+        } catch (error) {
+          setErrorStatus(error);
+        } finally {
+          window.homebridge.hideSpinner();
+        }
+      }
+
+      // ---------------------------------------------------------------------------------------
+      // Rendering
+      // ---------------------------------------------------------------------------------------
+
+      function renderWarnings() {
+        const busy = state.controllerBusy;
+        elements.warnings.innerHTML = (state.snapshot.warnings ?? []).map((warning) => {
+          const key = `warning.${warning}`;
+          const known = window.VTHERMO_I18N.en[key];
+          const text = known ? t(key, { time: formatTime(state.snapshot.cachedAt) }) : warning;
+          const important = warning === "controllerBusy";
+          return `<li class="${important ? "notice" : ""}">${escapeHtml(text)}</li>`;
+        }).join("");
+        elements.warnings.classList.toggle("muted", !busy);
+      }
+
+      function armedButton(action, id, labelKey, confirmKey) {
+        const armed = state.armed === `${action}:${id}`;
+        return `<button type="button" class="danger${armed ? " armed" : ""}" data-action="${action}" ${state.controllerBusy && action === "unpair" ? "disabled" : ""}>${escapeHtml(t(armed ? confirmKey : labelKey))}</button>`;
+      }
+
+      /**
+       * Paired nodes from the scan, plus nodes only known from the config (thermostat references or
+       * fixed addresses). This keeps the fixed IP field usable even without scan data, e.g. while
+       * the running child bridge owns the Matter controller.
+       */
+      function knownNodes() {
+        const nodes = new Map((state.snapshot.pairedNodes ?? []).map((node) => [node.nodeId, node]));
+        const references = state.config.thermostats.flatMap((thermostat) => [
+          ...thermostat.temperatureSources, thermostat.switchTarget, ...thermostat.contactSensors,
+        ]).filter(Boolean);
+
+        for (const reference of references) {
+          if (!nodes.has(reference.nodeId)) {
+            nodes.set(reference.nodeId, { nodeId: reference.nodeId, name: reference.nodeName || reference.nodeId, addresses: [], fromConfig: true });
+          }
+        }
+        for (const entry of state.config.nodeAddressOverrides) {
+          if (!nodes.has(entry.nodeId)) {
+            nodes.set(entry.nodeId, { nodeId: entry.nodeId, name: entry.nodeId, addresses: [], fromConfig: true });
+          }
+        }
+
+        return [...nodes.values()];
+      }
+
+      function nodeStatus(node) {
+        if (node.fromConfig) {
+          return { pill: "warn", label: "paired.unknown", help: "paired.unknownHelp" };
+        }
+        return node.reachable
+          ? { pill: "ok", label: "paired.reachable" }
+          : { pill: "warn", label: "paired.unreachable", help: "paired.unreachableHelp" };
+      }
+
+      function renderPairedNodes() {
+        const nodes = knownNodes();
+        if (!nodes.length) {
+          elements.pairedNodes.innerHTML = `<p class="muted">${escapeHtml(t("paired.empty"))}</p>`;
+          return;
+        }
+
+        elements.pairedNodes.innerHTML = nodes.map((node) => {
+          const override = getAddressOverride(node.nodeId);
+          const addressValid = isValidAddress(override);
+          const status = nodeStatus(node);
+          const storedAddress = (node.addresses ?? []).find((address) => /^\d+\.\d+\.\d+\.\d+/.test(address)) ?? "192.168.1.68";
+          return `
+            <article class="list-item" data-node-id="${escapeHtml(node.nodeId)}">
+              <div class="row">
+                <div class="stack">
+                  <h3>${escapeHtml(node.name)}</h3>
+                  <p class="muted">${escapeHtml(node.addresses?.join(", ") || t("paired.noAddress"))} • ${escapeHtml(t("paired.nodeId", { id: node.nodeId }))}</p>
+                </div>
+                <div class="row">
+                  <span class="pill ${status.pill}">${escapeHtml(t(status.label))}</span>
+                  ${node.fromConfig ? "" : armedButton("unpair", node.nodeId, "paired.remove", "paired.confirmRemove")}
+                </div>
+              </div>
+              ${node.reachable ? `<p class="muted">${escapeHtml(t("paired.counts", {
+                endpoints: node.endpointsDiscovered,
+                temperature: node.temperatureSources,
+                switches: node.switchTargets,
+                contacts: node.contactSensors,
+              }))}</p>` : `<p class="notice">${escapeHtml(t(status.help))}</p>`}
+              ${node.error ? `<p class="help">${escapeHtml(node.error)}</p>` : ""}
+              <label>
+                <span>${escapeHtml(t("paired.fixedAddress"))}</span>
+                <input type="text" data-address-override value="${escapeHtml(override)}" placeholder="${escapeHtml(storedAddress)}" inputmode="url" autocomplete="off" aria-invalid="${addressValid ? "false" : "true"}" />
+                <span class="help" data-address-help>${escapeHtml(t(addressValid ? "paired.fixedAddressHelp" : "paired.fixedAddressInvalid"))}</span>
+              </label>
+            </article>
+          `;
+        }).join("");
+      }
+
+      function manualPairingMarkup() {
+        return `
+          <article class="list-item" data-manual-pairing>
+            <div class="stack">
+              <h3>${escapeHtml(t("discovered.manualTitle"))}</h3>
+              <p class="muted">${escapeHtml(t("discovered.manualHelp"))}</p>
+            </div>
+            <div class="row">
+              <input type="text" data-pairing-code placeholder="${escapeHtml(t("discovered.codePlaceholder"))}" />
+              <button type="button" data-action="pair-manual" ${state.controllerBusy ? "disabled" : ""}>${escapeHtml(t("discovered.pair"))}</button>
+            </div>
+          </article>
+        `;
+      }
+
+      function renderDiscoveredNodes() {
+        const nodes = state.snapshot.discoveredNodes ?? [];
+        const list = nodes.length
+          ? nodes.map((node) => `
+            <article class="list-item" data-device-identifier="${escapeHtml(node.deviceIdentifier)}">
+              <div class="row">
+                <div class="stack">
+                  <h3>${escapeHtml(node.name)}</h3>
+                  <p class="muted">${escapeHtml(node.addresses?.join(", ") || t("paired.noAddress"))}</p>
+                </div>
+                <span class="pill ${node.paired ? "warn" : "ok"}">${escapeHtml(t(node.paired ? "discovered.alreadyPaired" : "discovered.ready"))}</span>
+              </div>
+              <p class="muted">${escapeHtml(t("discovered.meta", { vendor: node.vendorId ?? "?", product: node.productId ?? "?", type: node.deviceType ?? "?" }))}</p>
+              ${node.paired ? "" : `
+                <div class="row">
+                  <input type="text" data-pairing-code placeholder="${escapeHtml(t("discovered.codePlaceholder"))}" />
+                  <button type="button" data-action="pair" ${state.controllerBusy ? "disabled" : ""}>${escapeHtml(t("discovered.pair"))}</button>
+                </div>`}
+            </article>
+          `).join("")
+          : `<p class="muted">${escapeHtml(t("discovered.empty"))}</p>`;
+
+        elements.discoveredNodes.innerHTML = list + manualPairingMarkup();
+      }
+
+      function mergeSelectedOptions(options, selectedReferences) {
+        const merged = new Map((options ?? []).map((option) => [referenceKey(option.reference), option]));
+        for (const reference of selectedReferences.filter(Boolean)) {
+          const key = referenceKey(reference);
+          if (!merged.has(key)) {
+            merged.set(key, { label: `${t("field.unavailable")} / ${reference.nodeName} / ${reference.endpointName}`, reference });
+          }
+        }
+        return [...merged.values()].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+      }
+
+      function referenceDetails(reference) {
+        const details = [];
+        if (reference.uniqueId) details.push(`id ${reference.uniqueId}`);
+        if (reference.serialNumber) details.push(`sn ${reference.serialNumber}`);
+        details.push(`node ${reference.nodeId}`);
+        if (reference.parentEndpointId !== undefined) {
+          details.push(`parent ${reference.parentEndpointId}${reference.parentEndpointName ? ` ${reference.parentEndpointName}` : ""}`);
+        }
+        details.push(`endpoint ${reference.endpointId}`);
+        const types = (Array.isArray(reference.deviceTypes) && reference.deviceTypes.length ? reference.deviceTypes : [reference.deviceType])
+          .map(formatHex).filter(Boolean);
+        if (types.length) details.push(`types ${types.join(", ")}`);
+        return details.join(" | ");
+      }
+
+      function choiceMarkup(option, selected, field, type, groupName) {
+        const details = referenceDetails(option.reference);
+        return `
+          <label class="endpoint-choice" title="${escapeHtml(`${option.label}\n${details}`)}">
+            <input type="${type}" data-field="${field}"${groupName ? ` name="${escapeHtml(groupName)}"` : ""} value="${serializeReference(option.reference)}" ${selected ? "checked" : ""} />
+            <span class="endpoint-choice-body">
+              <span class="endpoint-choice-label">${escapeHtml(option.label)}</span>
+              <span class="endpoint-choice-meta">${escapeHtml(details)}</span>
+            </span>
+          </label>`;
+      }
+
+      function checkboxList(options, selected, field) {
+        const merged = mergeSelectedOptions(options, selected);
+        if (!merged.length) {
+          return `<p class="muted">${escapeHtml(t("field.noOptions"))}</p>`;
+        }
+        return merged.map((option) => choiceMarkup(option, selected.some((reference) => sameReference(reference, option.reference)), field, "checkbox")).join("");
+      }
+
+      function radioList(options, selected, field, groupName) {
+        const merged = mergeSelectedOptions(options, selected ? [selected] : []);
+        return [
+          `<label class="endpoint-choice">
+            <input type="radio" data-field="${field}" name="${escapeHtml(groupName)}" value="" ${selected ? "" : "checked"} />
+            <span class="endpoint-choice-body">
+              <span class="endpoint-choice-label">${escapeHtml(t("field.noSwitch"))}</span>
+              <span class="endpoint-choice-meta">${escapeHtml(t("field.noSwitchHelp"))}</span>
+            </span>
+          </label>`,
+          ...merged.map((option) => choiceMarkup(option, sameReference(option.reference, selected), field, "radio", groupName)),
+        ].join("");
+      }
+
+      function numberField(thermostat, field, labelKey, attributes, helpKey) {
+        return `
+          <label>
+            <span>${escapeHtml(t(labelKey))}</span>
+            <input type="number" data-field="${field}" value="${escapeHtml(thermostat[field])}" ${attributes} />
+            ${helpKey ? `<span class="help">${escapeHtml(t(helpKey))}</span>` : ""}
+          </label>`;
+      }
+
+      function endpointField(titleKey, helpKey, count, total, body, error) {
+        return `
+          <div class="endpoint-field">
+            <span class="field-title">
+              <span>${escapeHtml(t(titleKey))}</span>
+              <span class="count">${escapeHtml(t("field.selectedCount", { selected: count, total }))}</span>
+            </span>
+            <div class="endpoint-picker">${body}</div>
+            <span class="help">${escapeHtml(t(helpKey))}</span>
+            ${error ? `<span class="field-error">${escapeHtml(t(error))}</span>` : ""}
+          </div>`;
+      }
+
+      function renderThermostats() {
+        const thermostats = state.config.thermostats;
+        if (!thermostats.length) {
+          elements.thermostats.innerHTML = `<p class="muted">${escapeHtml(t("thermostats.empty"))}</p>`;
+          window.homebridge.fixScrollHeight?.();
+          return;
+        }
+
+        const snapshot = state.snapshot;
+        elements.thermostats.innerHTML = thermostats.map((thermostat, index) => `
+          <article class="thermostat" data-index="${index}">
+            <div class="row">
+              <h3>${escapeHtml(thermostat.name)}</h3>
+              ${armedButton("remove-thermostat", thermostat.id, "thermostats.remove", "thermostats.confirmRemove")}
+            </div>
+            <div class="grid">
+              <label>
+                <span>${escapeHtml(t("field.name"))}</span>
+                <input type="text" data-field="name" value="${escapeHtml(thermostat.name)}" />
+              </label>
+              <label>
+                <span>${escapeHtml(t("field.aggregation"))}</span>
+                <select data-field="temperatureAggregation">
+                  ${["average", "minimum", "maximum"].map((mode) => `<option value="${mode}" ${thermostat.temperatureAggregation === mode ? "selected" : ""}>${escapeHtml(t(`field.aggregation.${mode}`))}</option>`).join("")}
+                </select>
+              </label>
+              ${numberField(thermostat, "hysteresis", "field.hysteresis", 'step="0.1" min="0.1" max="5"', "field.hysteresisHelp")}
+              ${numberField(thermostat, "checkIntervalSeconds", "field.checkInterval", 'step="1" min="5" max="3600"')}
+              <label>
+                <span>${escapeHtml(t("field.relayRetry"))}</span>
+                <span class="toggle-option">
+                  <input type="checkbox" data-field="relayRetryEnabled" ${thermostat.relayRetryEnabled ? "checked" : ""} />
+                  <span>${escapeHtml(t("field.relayRetryToggle"))}</span>
+                </span>
+                <span class="help">${escapeHtml(t("field.relayRetryHelp"))}</span>
+              </label>
+              ${numberField(thermostat, "relayRetryDelayMinutes", "field.retryDelay", `step="1" min="1" max="180" ${thermostat.relayRetryEnabled ? "" : "disabled"}`)}
+              ${numberField(thermostat, "defaultTargetTemperature", "field.defaultTarget", 'step="0.5" min="5" max="35"')}
+              ${numberField(thermostat, "minTargetTemperature", "field.minTarget", 'step="0.5" min="5" max="35"')}
+              ${numberField(thermostat, "maxTargetTemperature", "field.maxTarget", 'step="0.5" min="5" max="35"')}
+            </div>
+            ${endpointField(
+              "field.temperatureSources", "field.temperatureSourcesHelp",
+              thermostat.temperatureSources.length,
+              mergeSelectedOptions(snapshot.temperatureSources, thermostat.temperatureSources).length,
+              checkboxList(snapshot.temperatureSources, thermostat.temperatureSources, "temperatureSources"),
+              thermostat.temperatureSources.length ? undefined : "field.missingSources",
+            )}
+            ${endpointField(
+              "field.switchTarget", "field.switchTargetHelp",
+              thermostat.switchTarget ? 1 : 0,
+              mergeSelectedOptions(snapshot.switchTargets, thermostat.switchTarget ? [thermostat.switchTarget] : []).length,
+              radioList(snapshot.switchTargets, thermostat.switchTarget, "switchTarget", `switchTarget-${index}`),
+              thermostat.switchTarget ? undefined : "field.missingSwitch",
+            )}
+            ${endpointField(
+              "field.contactSensors", "field.contactSensorsHelp",
+              thermostat.contactSensors.length,
+              mergeSelectedOptions(snapshot.contactSensors, thermostat.contactSensors).length,
+              checkboxList(snapshot.contactSensors, thermostat.contactSensors, "contactSensors"),
+            )}
+          </article>
+        `).join("");
+        window.homebridge.fixScrollHeight?.();
+      }
+
+      function renderAll() {
+        state.lang = resolveLanguage();
+        translateStatic();
+        elements.language.value = state.config.language;
+        elements.platformName.value = state.config.name;
+        elements.verboseLogging.checked = !!state.config.enableVerboseLogging;
+        elements.refresh.disabled = false;
+        renderStatus();
+        renderWarnings();
+        renderPairedNodes();
+        renderDiscoveredNodes();
+        renderThermostats();
+      }
+
+      // ---------------------------------------------------------------------------------------
+      // Server calls
+      // ---------------------------------------------------------------------------------------
+
+      function applySnapshot(snapshot) {
+        if (!snapshot) {
+          return;
+        }
+        state.snapshot = {
+          discoveredNodes: snapshot.discoveredNodes ?? [],
+          pairedNodes: snapshot.pairedNodes ?? [],
+          temperatureSources: snapshot.temperatureSources ?? [],
+          switchTargets: snapshot.switchTargets ?? [],
+          contactSensors: snapshot.contactSensors ?? [],
+          warnings: snapshot.warnings ?? [],
+          cachedAt: snapshot.cachedAt,
+        };
+        state.controllerBusy = snapshot.controllerBusy === true;
+      }
+
+      async function refreshSnapshot() {
+        window.homebridge.showSpinner();
+        elements.refresh.disabled = true;
+        setStatus("status.scanning");
+        try {
+          const snapshot = await window.homebridge.request("/bootstrap");
+          applySnapshot(snapshot);
+          setStatus(snapshot.controllerBusy ? "status.cached" : "status.refreshed", { time: formatTime(snapshot.cachedAt) });
+        } catch (error) {
+          setErrorStatus(error);
+        } finally {
+          window.homebridge.hideSpinner();
+          renderAll();
+        }
+      }
+
+      async function withSnapshotRequest(path, body, successKey) {
+        window.homebridge.showSpinner();
+        try {
+          const snapshot = await window.homebridge.request(path, body);
+          applySnapshot(snapshot);
+          setStatus(successKey);
+          window.homebridge.toast.success(t(successKey));
+          return true;
+        } catch (error) {
+          setErrorStatus(error);
+          return false;
+        } finally {
+          window.homebridge.hideSpinner();
+          renderAll();
+        }
+      }
+
+      function pairNode(deviceIdentifier, pairingCode) {
+        if (!pairingCode) {
+          setStatus("error.missingPairingCode", {}, true);
+          return;
+        }
+        setStatus("status.pairing");
+        void withSnapshotRequest("/pair", { deviceIdentifier, pairingCode }, "status.paired");
+      }
+
+      async function unpairNode(nodeId) {
+        if (await withSnapshotRequest("/unpair", { nodeId }, "status.unpaired")) {
+          state.config.thermostats = state.config.thermostats.map((thermostat) => ({
+            ...thermostat,
+            temperatureSources: thermostat.temperatureSources.filter((reference) => reference.nodeId !== nodeId),
+            switchTarget: thermostat.switchTarget?.nodeId === nodeId ? undefined : thermostat.switchTarget,
+            contactSensors: thermostat.contactSensors.filter((reference) => reference.nodeId !== nodeId),
+          }));
+          setAddressOverride(nodeId, "");
+          renderThermostats();
+          markDirty();
+        }
+      }
+
+      /** Destructive buttons need two clicks. */
+      function confirmArmed(key) {
+        if (state.armed === key) {
+          state.armed = undefined;
+          return true;
+        }
+        state.armed = key;
+        return false;
+      }
+
+      // ---------------------------------------------------------------------------------------
+      // Events
+      // ---------------------------------------------------------------------------------------
+
+      elements.language.addEventListener("change", () => {
+        state.config.language = elements.language.value;
+        renderAll();
+        markDirty();
+      });
+
+      elements.platformName.addEventListener("input", () => {
+        state.config.name = elements.platformName.value;
+        markDirty();
+      });
+
+      elements.verboseLogging.addEventListener("change", () => {
+        state.config.enableVerboseLogging = elements.verboseLogging.checked;
+        markDirty();
+      });
+
+      elements.refresh.addEventListener("click", () => void refreshSnapshot());
+      elements.save.addEventListener("click", () => void saveConfig());
+
+      elements.addThermostat.addEventListener("click", () => {
+        state.config.thermostats.push(createThermostat());
+        renderThermostats();
+        markDirty();
+      });
+
+      elements.discoveredNodes.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) {
+          return;
+        }
+        const container = button.closest("[data-device-identifier], [data-manual-pairing]");
+        const pairingCode = container?.querySelector("[data-pairing-code]")?.value?.trim() ?? "";
+        if (button.dataset.action === "pair") {
+          pairNode(container.dataset.deviceIdentifier, pairingCode);
+        } else if (button.dataset.action === "pair-manual") {
+          pairNode("", pairingCode);
+        }
+      });
+
+      elements.pairedNodes.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action='unpair']");
+        const nodeId = button?.closest("[data-node-id]")?.dataset.nodeId;
+        if (!nodeId) {
+          return;
+        }
+        if (confirmArmed(`unpair:${nodeId}`)) {
+          void unpairNode(nodeId);
+        } else {
+          renderPairedNodes();
+        }
+      });
+
+      elements.pairedNodes.addEventListener("input", (event) => {
+        const input = event.target.closest("[data-address-override]");
+        const nodeId = input?.closest("[data-node-id]")?.dataset.nodeId;
+        if (!input || !nodeId) {
+          return;
+        }
+        const valid = isValidAddress(input.value);
+        input.setAttribute("aria-invalid", valid ? "false" : "true");
+        input.parentElement.querySelector("[data-address-help]").textContent = t(valid ? "paired.fixedAddressHelp" : "paired.fixedAddressInvalid");
+        if (valid) {
+          setAddressOverride(nodeId, input.value);
+          markDirty();
+        }
+      });
+
+      function thermostatFor(element) {
+        const container = element.closest("[data-index]");
+        return container ? { container, thermostat: state.config.thermostats[Number(container.dataset.index)] } : {};
+      }
+
+      elements.thermostats.addEventListener("input", (event) => {
+        const input = event.target;
+        const field = input.dataset.field;
+        if (!field || input.type === "checkbox" || input.type === "radio" || input.tagName === "SELECT") {
+          return;
+        }
+        const { container, thermostat } = thermostatFor(input);
+        if (!thermostat) {
+          return;
+        }
+
+        if (NUMBER_FIELDS.includes(field)) {
+          // Keep the last valid number while the user is still typing (e.g. an empty field).
+          thermostat[field] = numberOr(input.value, thermostat[field]);
+        } else {
+          thermostat[field] = input.value;
+        }
+
+        if (field === "name") {
+          container.querySelector("h3").textContent = input.value || t("thermostats.defaultName", { n: Number(container.dataset.index) + 1 });
+        }
+        markDirty();
+      });
+
+      elements.thermostats.addEventListener("change", (event) => {
+        const target = event.target;
+        const field = target.dataset.field;
+        const { container, thermostat } = thermostatFor(target);
+        if (!field || !thermostat) {
+          return;
+        }
+
+        if (field === "relayRetryEnabled") {
+          thermostat.relayRetryEnabled = target.checked;
+        } else if (field === "temperatureSources" || field === "contactSensors") {
+          thermostat[field] = [...container.querySelectorAll(`input[type="checkbox"][data-field="${field}"]:checked`)]
+            .map((input) => parseReference(input.value))
+            .filter(Boolean);
+        } else if (field === "switchTarget") {
+          thermostat.switchTarget = parseReference(target.value);
+        } else if (field === "temperatureAggregation") {
+          thermostat.temperatureAggregation = target.value;
+        } else {
+          return;
+        }
+
+        renderThermostats();
+        markDirty();
+      });
+
+      elements.thermostats.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action='remove-thermostat']");
+        const { thermostat } = button ? thermostatFor(button) : {};
+        if (!thermostat) {
+          return;
+        }
+        if (confirmArmed(`remove-thermostat:${thermostat.id}`)) {
+          state.config.thermostats = state.config.thermostats.filter((entry) => entry !== thermostat);
+          markDirty();
+        }
+        renderThermostats();
+      });
+
+      // ---------------------------------------------------------------------------------------
+      // Start
+      // ---------------------------------------------------------------------------------------
+
+      async function bootstrap() {
+        window.homebridge.hideSchemaForm?.();
+        window.homebridge.disableSaveButton();
+
+        try {
+          state.homebridgeLang = await window.homebridge.i18nCurrentLang?.() ?? navigator.language;
+        } catch {
+          state.homebridgeLang = navigator.language;
+        }
+
+        const blocks = await window.homebridge.getPluginConfig();
+        state.config = normalizeConfig(blocks.find((entry) => entry.platform === PLATFORM) ?? {});
+        state.lang = resolveLanguage();
+        if (!state.config.thermostats.length) {
+          state.config.thermostats = [createThermostat(0)];
+        }
+
+        // Show the last scan right away, then run a live scan.
+        try {
+          const cached = await window.homebridge.request("/cached");
+          if (cached) {
+            applySnapshot(cached);
+            setStatus("status.loadingCache");
+          }
+        } catch {
+          // No cache yet.
+        }
+        renderAll();
+        await refreshSnapshot();
+      }
+
+      void bootstrap();
+    </script>
+  </body>
+</html>

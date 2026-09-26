@@ -1,0 +1,56 @@
+{
+  "name": "homebridge-vthermo",
+  "displayName": "Homebridge Vthermo",
+  "type": "module",
+  "version": "2.0.0",
+  "description": "Virtual thermostat for Homebridge that reads Matter temperature/contact sensors and switches a Matter On/Off relay.",
+  "author": "palmaiz",
+  "license": "MIT",
+  "homepage": "https://github.com/zozika/homebridge-vthermo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zozika/homebridge-vthermo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zozika/homebridge-vthermo/issues"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "homebridge-ui",
+    "config.schema.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "homebridge-plugin",
+    "homebridge",
+    "thermostat",
+    "virtual-thermostat",
+    "matter"
+  ],
+  "engines": {
+    "node": "^20.18.0 || ^22.10.0 || ^24.0.0",
+    "homebridge": "^1.8.0 || ^2.0.0"
+  },
+  "scripts": {
+    "clean": "rimraf ./dist",
+    "build": "rimraf ./dist && tsc",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "dependencies": {
+    "@homebridge/plugin-ui-utils": "^2.2.3",
+    "@matter/main": "~0.16.11",
+    "@matter/nodejs": "~0.16.11",
+    "@matter/protocol": "~0.16.11",
+    "@matter/types": "~0.16.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "homebridge": "^2.4.0",
+    "rimraf": "^6.1.0",
+    "typescript": "^5.9.3"
+  }
+}
