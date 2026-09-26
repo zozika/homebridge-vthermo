@@ -13,7 +13,7 @@
       "app.verboseHelp": "Show detailed runtime logs in Homebridge",
 
       "status.loadingCache": "Showing the last saved scan, refreshing…",
-      "status.scanning": "Scanning Matter network…",
+      "status.scanning": "Scanning the Matter network… large bridges can take 1–2 minutes. You can keep editing meanwhile.",
       "status.refreshed": "Matter scan refreshed.",
       "status.cached": "Showing the scan from {time}.",
       "status.unsaved": "Unsaved changes. Click Save.",
@@ -106,7 +106,7 @@
       "app.verboseHelp": "Részletes futási napló a Homebridge-ben",
 
       "status.loadingCache": "Az utolsó mentett keresés látható, frissítés folyamatban…",
-      "status.scanning": "Matter hálózat keresése…",
+      "status.scanning": "Matter hálózat keresése… nagy bridge-eknél 1–2 perc is lehet. Közben nyugodtan szerkesztheted a beállításokat.",
       "status.refreshed": "Matter keresés frissítve.",
       "status.cached": "A {time} időpontban mentett keresés látható.",
       "status.unsaved": "Nem mentett változások. Kattints a Mentésre.",

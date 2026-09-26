@@ -2,7 +2,7 @@
   "name": "homebridge-vthermo",
   "displayName": "Homebridge Vthermo",
   "type": "module",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Virtual thermostat for Homebridge that reads Matter temperature/contact sensors and switches a Matter On/Off relay.",
   "author": "palmaiz",
   "license": "MIT",

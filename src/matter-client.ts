@@ -398,6 +398,14 @@ export class MatterControllerClient {
     const switchTargets = new Map<string, MatterOption>();
     const contactSensors = new Map<string, MatterOption>();
 
+    // Commissionable discovery (fixed ~12s) runs while the paired nodes are being read.
+    const discoveryPromise: Promise<MatterCommissionableNode[]> = options.discover === false
+      ? Promise.resolve([])
+      : this.discoverCommissionableNodes().catch((error) => {
+        this.log.warn(`Matter discovery failed: ${errorMessage(error)}`);
+        return [];
+      });
+
     const pairedNodes = await Promise.all(this.getCommissionedNodes(controller).map(async (node) => {
       const base = {
         nodeId: node.id,
@@ -448,12 +456,7 @@ export class MatterControllerClient {
       }
     }));
 
-    const discoveredNodes = options.discover === false
-      ? []
-      : await this.discoverCommissionableNodes().catch((error) => {
-        this.log.warn(`Matter discovery failed: ${errorMessage(error)}`);
-        return [];
-      });
+    const discoveredNodes = await discoveryPromise;
 
     const byLabel = (left: MatterOption, right: MatterOption) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
     const snapshot: MatterUiSnapshot = {

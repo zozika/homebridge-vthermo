@@ -340,6 +340,7 @@
         config: { platform: PLATFORM, name: "Vthermo Platform", language: "auto", enableVerboseLogging: false, nodeAddressOverrides: [], thermostats: [] },
         snapshot: { discoveredNodes: [], pairedNodes: [], temperatureSources: [], switchTargets: [], contactSensors: [], warnings: [] },
         controllerBusy: false,
+        scanning: false,
         homebridgeLang: "en",
         lang: "en",
         armed: undefined,
@@ -611,7 +612,7 @@
 
       function armedButton(action, id, labelKey, confirmKey) {
         const armed = state.armed === `${action}:${id}`;
-        return `<button type="button" class="danger${armed ? " armed" : ""}" data-action="${action}" ${state.controllerBusy && action === "unpair" ? "disabled" : ""}>${escapeHtml(t(armed ? confirmKey : labelKey))}</button>`;
+        return `<button type="button" class="danger${armed ? " armed" : ""}" data-action="${action}" ${(state.controllerBusy || state.scanning) && action === "unpair" ? "disabled" : ""}>${escapeHtml(t(armed ? confirmKey : labelKey))}</button>`;
       }
 
       /**
@@ -698,7 +699,7 @@
             </div>
             <div class="row">
               <input type="text" data-pairing-code placeholder="${escapeHtml(t("discovered.codePlaceholder"))}" />
-              <button type="button" data-action="pair-manual" ${state.controllerBusy ? "disabled" : ""}>${escapeHtml(t("discovered.pair"))}</button>
+              <button type="button" data-action="pair-manual" ${state.controllerBusy || state.scanning ? "disabled" : ""}>${escapeHtml(t("discovered.pair"))}</button>
             </div>
           </article>
         `;
@@ -720,7 +721,7 @@
               ${node.paired ? "" : `
                 <div class="row">
                   <input type="text" data-pairing-code placeholder="${escapeHtml(t("discovered.codePlaceholder"))}" />
-                  <button type="button" data-action="pair" ${state.controllerBusy ? "disabled" : ""}>${escapeHtml(t("discovered.pair"))}</button>
+                  <button type="button" data-action="pair" ${state.controllerBusy || state.scanning ? "disabled" : ""}>${escapeHtml(t("discovered.pair"))}</button>
                 </div>`}
             </article>
           `).join("")
@@ -911,10 +912,19 @@
         state.controllerBusy = snapshot.controllerBusy === true;
       }
 
-      async function refreshSnapshot() {
-        window.homebridge.showSpinner();
+      /**
+       * With a cached scan on screen the live scan runs in the background, so the page stays usable
+       * while a large bridge is being read. Without anything to show we block with the spinner.
+       */
+      async function refreshSnapshot({ background = false } = {}) {
+        if (!background) {
+          window.homebridge.showSpinner();
+        }
+        state.scanning = true;
         elements.refresh.disabled = true;
         setStatus("status.scanning");
+        renderPairedNodes();
+        renderDiscoveredNodes();
         try {
           const snapshot = await window.homebridge.request("/bootstrap");
           applySnapshot(snapshot);
@@ -922,8 +932,18 @@
         } catch (error) {
           setErrorStatus(error);
         } finally {
+          state.scanning = false;
           window.homebridge.hideSpinner();
-          renderAll();
+          // Re-rendering the thermostat list would steal focus from a field the user is editing.
+          if (background && elements.thermostats.contains(document.activeElement)) {
+            renderStatus();
+            renderWarnings();
+            renderPairedNodes();
+            renderDiscoveredNodes();
+            elements.refresh.disabled = false;
+          } else {
+            renderAll();
+          }
         }
       }
 
@@ -1148,7 +1168,7 @@
           // No cache yet.
         }
         renderAll();
-        await refreshSnapshot();
+        await refreshSnapshot({ background: state.snapshot.cachedAt !== undefined });
       }
 
       void bootstrap();

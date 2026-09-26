@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.3
+
+### Changed
+- The settings page no longer blocks with a spinner while a live Matter scan runs in the background
+  (when a previous scan is shown). Pairing buttons are disabled until the scan finishes.
+- Commissionable discovery now runs in parallel with reading the paired nodes, so a scan is ~12 s faster.
+
 ## 2.0.2
 
 ### Fixed
