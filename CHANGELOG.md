@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.1
+
+### Fixed
+- The startup route check only warns for sleepy (Thread) devices. Ordinary devices on another VLAN
+  are reached through the default gateway, so a missing specific route is not a problem there.
+
 ## 2.3.0
 
 ### Added

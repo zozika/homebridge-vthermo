@@ -255,8 +255,13 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
     }
 
     for (const [nodeId, addresses] of ipv6Nodes) {
+      // Only Thread (sleepy) devices need a specific route; ordinary devices on another VLAN are
+      // normally reached through the default gateway, so a missing route says nothing there.
+      if (!icdNodeIds.has(nodeId)) {
+        continue;
+      }
       const unrouted = addresses.filter((address) => !address.toLowerCase().startsWith("fe80:") && !hasSpecificRoute(address, routes));
-      if (unrouted.length && (icdNodeIds.has(nodeId) || unrouted.length === addresses.length)) {
+      if (unrouted.length) {
         this.log.warn(`Matter node ${nodeId}: no route to ${unrouted.join(", ")}. If this is a Thread device, the host does not `
           + "accept the Thread border routers' route announcements. On Linux run "
           + `"sysctl -w net.ipv6.conf.${matterInterface ?? "<interface>"}.accept_ra_rt_info_max_plen=64" and make it persistent.`);
