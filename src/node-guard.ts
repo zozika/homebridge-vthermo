@@ -82,11 +82,21 @@ export class NodeGuard {
     entry.consecutiveFailures = 0;
   }
 
-  run<T>(nodeId: string, description: string, action: () => Promise<T>, timeoutMs = this.options.timeoutMs): Promise<T> {
+  /**
+   * @param timeoutOpensCircuit false for sleepy (ICD) devices: a slow answer from a device that is
+   *   asleep is expected and must not put the node into backoff; only real network errors do.
+   */
+  run<T>(
+    nodeId: string,
+    description: string,
+    action: () => Promise<T>,
+    timeoutMs = this.options.timeoutMs,
+    timeoutOpensCircuit = true,
+  ): Promise<T> {
     const previous = this.queues.get(nodeId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
-      .then(() => this.execute(nodeId, description, action, timeoutMs));
+      .then(() => this.execute(nodeId, description, action, timeoutMs, timeoutOpensCircuit));
 
     this.queues.set(nodeId, next);
     void next.catch(() => undefined).finally(() => {
@@ -98,7 +108,13 @@ export class NodeGuard {
     return next;
   }
 
-  private async execute<T>(nodeId: string, description: string, action: () => Promise<T>, timeoutMs: number): Promise<T> {
+  private async execute<T>(
+    nodeId: string,
+    description: string,
+    action: () => Promise<T>,
+    timeoutMs: number,
+    timeoutOpensCircuit: boolean,
+  ): Promise<T> {
     const entry = this.getHealth(nodeId);
     const now = this.now();
 
@@ -118,6 +134,10 @@ export class NodeGuard {
       }
       return result;
     } catch (error) {
+      if (!timeoutOpensCircuit && error instanceof OperationTimeoutError) {
+        throw error;
+      }
+
       if (this.isNodeLevelFailure(error)) {
         entry.consecutiveFailures += 1;
         entry.lastError = (error instanceof Error ? error.message : String(error)).trim().replace(/\.+$/, "");

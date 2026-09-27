@@ -31,6 +31,12 @@ const FIRST_CYCLE_DELAY_MS = 3_000;
 const STARTUP_RETRY_MS = 15_000;
 /** How long a last good reading may be reused when a sensor temporarily does not answer. */
 const STALE_READING_MS = 10 * 60_000;
+/**
+ * A window sensor whose value is older than this counts as closed and raises a fault. Sleepy
+ * (ICD) sensors report the time their subscription last confirmed the value, so this also covers
+ * a lost subscription.
+ */
+const CONTACT_STALE_MS = 15 * 60_000;
 
 export interface ThermostatStatus {
   id: string;
@@ -71,6 +77,7 @@ export class VthermoAccessory {
   private windowOpen = false;
   private humidity?: number;
   private lastCycleAt?: number;
+  private readonly startedAt = Date.now();
   private sourceStates: ThermostatStatus["sources"] = [];
   private readonly contactStates = new Map<string, { open: boolean; at: number }>();
 
@@ -267,6 +274,16 @@ export class VthermoAccessory {
   // Control cycle
   // ---------------------------------------------------------------------------------------------
 
+  /** Every Matter endpoint this thermostat reads. */
+  get allReferences(): MatterEndpointReference[] {
+    return [
+      ...this.config.temperatureSources,
+      ...this.config.contactSensors,
+      this.config.switchTarget,
+      ...(this.config.humiditySource ? [this.config.humiditySource] : []),
+    ];
+  }
+
   /** References whose changes should trigger an immediate cycle (window sensors, relay). */
   get watchedReferences(): MatterEndpointReference[] {
     return [...this.config.contactSensors, this.config.switchTarget];
@@ -370,11 +387,12 @@ export class VthermoAccessory {
 
     // Contact sensors: a sensor that does not answer keeps its last state for a while, then counts as closed.
     let anyOpen = false;
+    let contactError: string | undefined;
     for (const sensor of this.config.contactSensors) {
       const key = referenceKey(sensor);
       const result = results.get(key);
       if (result?.ok && typeof result.value === "boolean") {
-        this.contactStates.set(key, { open: result.value, at: now });
+        this.contactStates.set(key, { open: result.value, at: result.at ?? now });
         sources.push({ name: sensor.endpointName, kind: "contact", value: result.value });
       } else {
         const error = result && !result.ok ? result.error : `${sensor.endpointName}: no value`;
@@ -383,8 +401,13 @@ export class VthermoAccessory {
       }
 
       const state = this.contactStates.get(key);
-      if (state && now - state.at <= STALE_READING_MS && state.open) {
+      if (state && now - state.at <= CONTACT_STALE_MS && state.open) {
         anyOpen = true;
+      }
+      if (!state || now - state.at > CONTACT_STALE_MS) {
+        // Keep heating (closed) but make the missing sensor visible in Apple Home.
+        const since = state ? `for ${Math.round((now - state.at) / 60_000)} min` : "yet";
+        contactError ??= `Window sensor ${sensor.endpointName} has not reported ${since}; treating it as closed.`;
       }
     }
 
@@ -443,7 +466,9 @@ export class VthermoAccessory {
       });
     }
 
-    const fault = temperatureError ?? relayError;
+    // A window sensor that was never read at all at startup is not a fault yet.
+    const contactFault = this.lastCycleAt !== undefined && now - this.startedAt > CONTACT_STALE_MS ? contactError : undefined;
+    const fault = temperatureError ?? relayError ?? contactFault;
     if (fault) {
       this.setFault(fault);
     } else {

@@ -38,6 +38,9 @@ function setup(overrides = {}, platformOptions = {}) {
   const client = {
     readEndpoints: async (references) => new Map(references.map((reference) => {
       const value = values.get(referenceKey(reference));
+      if (value && typeof value === "object" && "value" in value) {
+        return [referenceKey(reference), { ok: true, ...value }];
+      }
       return [referenceKey(reference), value instanceof Error
         ? { ok: false, error: value.message }
         : value === undefined ? { ok: false, error: "no value" } : { ok: true, value }];
@@ -175,4 +178,19 @@ test("records Eve history entries when enabled", async () => {
   assert.ok(thermostat.history, "history service created");
   await new Promise((resolve) => setTimeout(resolve, 1500));
   assert.deepEqual(await readdir(join(storage, "vthermo-history")), ["vthermo-t1.json"]);
+});
+
+test("a window value older than 15 minutes (lost sleepy-device subscription) counts as closed", async () => {
+  const { set, thermostat, commands } = setup();
+  set(sensorA, 19); set(sensorB, 19); set(relayRef, false);
+
+  set(windowSensor, { value: true, at: Date.now() - 16 * 60_000 });
+  await thermostat.cycle();
+  assert.deepEqual(commands, [true]);
+  assert.equal(thermostat.getStatus().windowOpen, false);
+
+  set(windowSensor, { value: true, at: Date.now() - 60_000 });
+  await thermostat.cycle();
+  assert.deepEqual(commands, [true, false]);
+  assert.equal(thermostat.getStatus().demandReason, "window");
 });

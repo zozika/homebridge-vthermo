@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.3.0
+
+### Added
+- **Sleepy (ICD) Matter devices**, e.g. battery Thread door sensors like IKEA MYGGBETT. They are
+  detected from their session idle interval or the IcdManagement cluster and are **never polled**:
+  matter.js keeps a permanent subscription (its native auto-subscribe, including LIT check-in
+  registration) and the thermostats read the reported values from the node state. Changes trigger
+  a control cycle immediately. Values stay valid while the subscription is confirmed; after
+  15 minutes without it a window counts as closed and the thermostat shows a fault. Lost
+  subscriptions are retried every minute. Independent of `instantUpdates`.
+- ICD details (idle/active interval) on the settings page and in the live status.
+- **Startup network diagnostics** (Linux): warns when the host has no routable IPv6 address, or no
+  route to a device's IPv6 address (typical for Thread when the host ignores the border routers'
+  route information, `accept_ra_rt_info_max_plen`).
+- **`matterInterface`**: limit Matter discovery to one network interface (e.g. `br0`), so Docker/LXC
+  bridges are not used.
+- End-to-end test for a sleepy device (`test/e2e/run-icd.mjs`).
+
+### Changed
+- Pairing picks the device record whose commissioning window is open (CM ≠ 0) and ignores stale
+  Thread records; commissioning may take up to 3 minutes (sleepy devices). The settings page shows
+  a tip to keep battery devices awake while pairing.
+- Timeouts for sleepy devices cover a full idle interval, and a timeout does not put them into backoff.
+- A window sensor that has not reported for 15 minutes (was 10) counts as closed and now raises a fault.
+
 ## 2.2.1
 
 ### Fixed

@@ -30,6 +30,7 @@ switches a Matter On/Off relay or plug. The thermostat shows up in Apple Home li
 - Pair and remove Matter devices while the plugin is running
 - Optional instant updates for window sensors and relays (Matter subscriptions, experimental)
 - Optional Eve app history graphs
+- Battery Thread sensors (sleepy / ICD devices such as IKEA MYGGBETT) via a permanent Matter subscription instead of polling
 
 ## Install
 
@@ -77,6 +78,18 @@ settings page (`nodeAddressOverrides`).
 pairing in the settings and pair the device again; your thermostat selections are reconnected
 automatically.
 
+**Battery Thread sensors (sleepy / ICD devices)**, e.g. IKEA MYGGBETT: they sleep between reports,
+so Vthermo never polls them; it keeps a Matter subscription and uses the values it delivers. A value
+older than 15 minutes counts as closed (window) and raises a fault. To pair one that is already in
+Apple Home: Home app → device → *Turn On Pairing Mode*, then paste the code in *Pair by Matter code*
+and keep the device awake (open/close the door) while pairing. The Homebridge host needs IPv6 and a
+route to the Thread network: on Linux enable IPv6 (SLAAC) on the interface and accept the border
+routers' route information (`net.ipv6.conf.<if>.accept_ra_rt_info_max_plen=64`, made persistent).
+Vthermo logs a warning at startup when either is missing.
+
+**Several network interfaces (Docker, LXC)**: set `matterInterface` (e.g. `br0`) so Matter discovery
+only uses the interface that reaches your devices.
+
 **Detailed logging**: turn on *Detailed logging* in the settings. For deep Matter protocol traces
 start Homebridge with `MATTER_LOG_LEVEL=debug`.
 
@@ -90,6 +103,7 @@ The settings page writes the config for you. Reference:
 | `enableVerboseLogging` | `false` | Detailed runtime logs |
 | `instantUpdates` | `false` | Experimental: Matter subscriptions for window sensors and relays |
 | `enableHistory` | `false` | Eve app history (stored under `vthermo-history/`) |
+| `matterInterface` | | Limit Matter discovery to one interface, e.g. `br0` |
 | `nodeAddressOverrides` | `[]` | `[{ "nodeId": "...", "address": "192.168.1.68:5540" }]` fixed addresses for nodes mDNS cannot find |
 | `thermostats[].name` | | Name in Apple Home |
 | `thermostats[].temperatureSources` | | Matter temperature endpoints (selected in the UI) |
@@ -121,6 +135,15 @@ npm test
 npm pack
 ```
 
+End-to-end tests against a virtual Matter device (see `test/e2e/`):
+
+```bash
+MATTER_MDNS_NETWORKINTERFACE=en0 node test/e2e/virtual-device.mjs &
+MATTER_MDNS_NETWORKINTERFACE=en0 node test/e2e/run.mjs
+```
+
+For the sleepy-device scenario start the device with `VTHERMO_TEST_ICD=1` and run `test/e2e/run-icd.mjs`.
+
 ---
 
 ## Magyarul
@@ -149,6 +172,7 @@ On/Off relét vagy konnektort kapcsol. Az Apple Home-ban normál termosztátkén
 - Párosítás és törlés a plugin leállítása nélkül
 - Opcionális azonnali frissítés ablakérzékelőkre és relékre (Matter feliratkozás, kísérleti)
 - Opcionális Eve app előzménygrafikonok
+- Elemes Thread érzékelők (alvó / ICD eszközök, pl. IKEA MYGGBETT) állandó Matter feliratkozással, lekérdezés nélkül
 
 ### Beállítás
 

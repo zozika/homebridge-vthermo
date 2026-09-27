@@ -349,6 +349,11 @@
         </span>
       </label>
       <label>
+        <span data-i18n="app.matterInterface"></span>
+        <input id="matter-interface" type="text" placeholder="br0" autocomplete="off" />
+        <span class="help" data-i18n="app.matterInterfaceHelp"></span>
+      </label>
+      <label>
         <span data-i18n="app.history"></span>
         <span class="toggle-option">
           <input id="enable-history" type="checkbox" />
@@ -425,6 +430,7 @@
         verboseLogging: $("verbose-logging"),
         instantUpdates: $("instant-updates"),
         enableHistory: $("enable-history"),
+        matterInterface: $("matter-interface"),
         refresh: $("refresh"),
         save: $("save"),
         status: $("status"),
@@ -591,6 +597,7 @@
           enableVerboseLogging: block?.enableVerboseLogging === true,
           instantUpdates: block?.instantUpdates === true,
           enableHistory: block?.enableHistory === true,
+          matterInterface: typeof block?.matterInterface === "string" ? block.matterInterface.trim() : "",
           nodeAddressOverrides: Array.isArray(block?.nodeAddressOverrides)
             ? block.nodeAddressOverrides.filter((entry) => entry && typeof entry.nodeId === "string" && typeof entry.address === "string")
             : [],
@@ -606,6 +613,7 @@
           enableVerboseLogging: elements.verboseLogging.checked,
           instantUpdates: elements.instantUpdates.checked,
           enableHistory: elements.enableHistory.checked,
+          matterInterface: elements.matterInterface.value.trim() || undefined,
           nodeAddressOverrides: state.config.nodeAddressOverrides.filter((entry) => entry.address.trim()),
           thermostats: state.config.thermostats,
         };
@@ -725,6 +733,11 @@
         return [...nodes.values()];
       }
 
+      function icdDetails(icd) {
+        const seconds = (ms) => (typeof ms === "number" ? `${Math.round(ms / 100) / 10} s` : "?");
+        return t("paired.icdDetails", { sii: seconds(icd.idleIntervalMs ?? icd.idleModeDurationMs), sai: seconds(icd.activeIntervalMs), sat: seconds(icd.activeThresholdMs) });
+      }
+
       function nodeStatus(node) {
         if (node.fromConfig) {
           return { pill: "warn", label: "paired.unknown", help: "paired.unknownHelp" };
@@ -758,6 +771,7 @@
                 </div>
                 <div class="row">
                   <span class="pill ${status.pill}">${escapeHtml(t(status.label))}</span>
+                  ${node.icd ? `<span class="pill" title="${escapeHtml(icdDetails(node.icd))}">${escapeHtml(t("paired.icd"))}</span>` : ""}
                   ${node.fromConfig ? "" : armedButton("unpair", node.nodeId, "paired.remove", "paired.confirmRemove")}
                 </div>
               </div>
@@ -785,6 +799,7 @@
             <div class="stack">
               <h3>${escapeHtml(t("discovered.manualTitle"))}</h3>
               <p class="muted">${escapeHtml(t("discovered.manualHelp"))}</p>
+              <p class="help">${escapeHtml(t("discovered.icdHint"))}</p>
             </div>
             <div class="row">
               <input type="text" data-pairing-code placeholder="${escapeHtml(t("discovered.codePlaceholder"))}" />
@@ -1001,6 +1016,7 @@
         elements.verboseLogging.checked = !!state.config.enableVerboseLogging;
         elements.instantUpdates.checked = !!state.config.instantUpdates;
         elements.enableHistory.checked = !!state.config.enableHistory;
+        elements.matterInterface.value = state.config.matterInterface ?? "";
         elements.refresh.disabled = false;
         renderStatus();
         renderWarnings();
@@ -1026,12 +1042,17 @@
         const stale = live.ageMs > STATUS_STALE_MS;
         elements.liveUpdated.textContent = `${t("live.updated", { age: formatAge(live.ageMs) })}${live.version ? ` • v${live.version}` : ""}`;
 
-        const nodeNotes = (live.nodes ?? []).filter((node) => !node.online && node.lastError).map((node) => `
+        const nodeNotes = (live.nodes ?? []).filter((node) => node.icd && !node.online).map((node) => `
+          <div class="status-card fault">
+            <strong>${escapeHtml(node.name)}</strong>
+            <span class="pill warn">${escapeHtml(t("paired.icd"))}</span>
+            <span class="help">${escapeHtml(t("live.icdWaiting", { age: node.lastReportAt ? formatAge(Date.now() - node.lastReportAt) : "–" }))}</span>
+          </div>`).concat((live.nodes ?? []).filter((node) => !node.icd && !node.online && node.lastError).map((node) => `
           <div class="status-card fault">
             <strong>${escapeHtml(node.name)}</strong>
             <span class="pill warn">${escapeHtml(t(node.problem === "notPaired" ? "paired.notPaired" : "paired.unreachable"))}</span>
             <span class="help">${escapeHtml(node.problem === "notPaired" ? t("paired.notPairedHelp") : node.lastError)}</span>
-          </div>`);
+          </div>`));
 
         const cards = live.thermostats.map((thermostat) => {
           const temperature = typeof thermostat.currentTemperature === "number" ? `${thermostat.currentTemperature.toFixed(1)} °C` : "–";
@@ -1256,6 +1277,11 @@
 
       elements.instantUpdates.addEventListener("change", () => {
         state.config.instantUpdates = elements.instantUpdates.checked;
+        markDirty();
+      });
+
+      elements.matterInterface.addEventListener("input", () => {
+        state.config.matterInterface = elements.matterInterface.value.trim();
         markDirty();
       });
 

@@ -37,6 +37,8 @@ export interface VthermoPlatformConfig extends PlatformConfig {
   instantUpdates?: boolean;
   /** Eve app history graphs for the thermostats. */
   enableHistory?: boolean;
+  /** Network interface for Matter discovery (e.g. "br0"); empty = all. */
+  matterInterface?: string;
   nodeAddressOverrides?: NodeAddressOverrideConfig[];
   thermostats?: ThermostatConfig[];
   temperatureSources?: MatterEndpointReference[];

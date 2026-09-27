@@ -40,6 +40,11 @@
         "type": "boolean",
         "default": false
       },
+      "matterInterface": {
+        "title": "Matter network interface",
+        "type": "string",
+        "description": "Optional, e.g. br0. Limits Matter mDNS discovery to this interface."
+      },
       "nodeAddressOverrides": {
         "title": "Fixed Matter node addresses",
         "description": "Optional. Use only when mDNS discovery cannot find a paired node (e.g. different subnet).",

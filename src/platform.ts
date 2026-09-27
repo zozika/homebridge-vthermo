@@ -1,4 +1,5 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 
 import type { API, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from "homebridge";
@@ -6,7 +7,8 @@ import type { API, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformCo
 import { resolvePlatformConfig } from "./config.js";
 import { ControlServer } from "./control-server.js";
 import type { ResolvedThermostatConfig, VthermoPlatformConfig } from "./config.js";
-import { MatterControllerClient, type MatterUiSnapshot } from "./matter-client.js";
+import { ICD_SUBSCRIBE_RETRY_MS, MatterControllerClient, type MatterUiSnapshot } from "./matter-client.js";
+import { hasRoutableIpv6, hasSpecificRoute, readIpv6Routes } from "./network-diagnostics.js";
 import { referenceKey, type MatterEndpointReference } from "./matter-model.js";
 import { withTimeout } from "./node-guard.js";
 import { rebindInPlace } from "./rebind.js";
@@ -34,6 +36,7 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
   private controlServer?: ControlServer;
   private readonly subscriptionClosers: Array<() => void> = [];
   private shuttingDown = false;
+  private icdNodeIds: ReadonlySet<string> = new Set();
 
   constructor(
     public readonly log: Logging,
@@ -45,6 +48,7 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       log,
       storagePath: api.user.storagePath(),
       verbose: () => this.verboseLoggingEnabled,
+      matterInterface: (config as VthermoPlatformConfig).matterInterface,
     });
 
     // Never let a startup or shutdown problem become an unhandled rejection that kills the bridge.
@@ -107,6 +111,12 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       thermostat.start();
     }
 
+    this.icdNodeIds = await this.startIcdSubscriptions().catch((error) => {
+      this.log.warn(`Could not set up sleepy (ICD) devices: ${error instanceof Error ? error.message : String(error)}`);
+      return new Set<string>();
+    });
+    this.runNetworkDiagnostics(this.icdNodeIds).catch(() => undefined);
+
     if ((this.config as VthermoPlatformConfig).instantUpdates) {
       this.startSubscriptions().catch((error) => this.log.warn(`Instant updates failed to start: ${String(error)}`));
     }
@@ -162,6 +172,98 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
     }
   }
 
+  /** All references of all thermostats, grouped by node. */
+  private referencesByNode(select: (thermostat: VthermoAccessory) => MatterEndpointReference[]): Map<string, Map<string, MatterEndpointReference>> {
+    const byNode = new Map<string, Map<string, MatterEndpointReference>>();
+    for (const thermostat of this.thermostats) {
+      for (const reference of select(thermostat)) {
+        const references = byNode.get(reference.nodeId) ?? new Map();
+        references.set(referenceKey(reference), reference);
+        byNode.set(reference.nodeId, references);
+      }
+    }
+    return byNode;
+  }
+
+  /**
+   * Sleepy (ICD) devices such as battery Thread sensors are never polled: they get a permanent
+   * subscription and the thermostats read the values it delivers. This is independent of the
+   * experimental instantUpdates option. Returns the ids of the sleepy nodes.
+   */
+  private async startIcdSubscriptions(): Promise<Set<string>> {
+    const byNode = this.referencesByNode((thermostat) => thermostat.allReferences);
+    const icdNodes = await this.controllerClient.findIcdNodes(byNode.keys());
+
+    const onChange = (nodeId: string) => (key: string | undefined) => {
+      for (const thermostat of this.thermostats) {
+        if (thermostat.allReferences.some((reference) => reference.nodeId === nodeId && (key === undefined || referenceKey(reference) === key))) {
+          thermostat.requestCycle();
+        }
+      }
+    };
+
+    const subscribe = async (nodeId: string, attempt: number): Promise<void> => {
+      if (this.shuttingDown) {
+        return;
+      }
+      try {
+        const references = [...(byNode.get(nodeId)?.values() ?? [])];
+        this.subscriptionClosers.push(await this.controllerClient.enableIcdSubscription(nodeId, references, onChange(nodeId)));
+      } catch (error) {
+        if (attempt === 1) {
+          this.log.warn(`Sleepy device ${nodeId}: subscription not established yet, retrying every minute: `
+            + `${error instanceof Error ? error.message : String(error)}`);
+        }
+        const retry = setTimeout(() => {
+          void subscribe(nodeId, attempt + 1);
+        }, ICD_SUBSCRIBE_RETRY_MS);
+        retry.unref?.();
+      }
+    };
+
+    for (const [nodeId, info] of icdNodes) {
+      const idle = Math.max(info.idleIntervalMs ?? 0, info.idleModeDurationMs ?? 0);
+      this.log.info(`Matter node ${nodeId} is a sleepy (ICD) device${idle ? ` (idle interval ${Math.round(idle / 1000)} s)` : ""}; `
+        + "using its subscription instead of polling.");
+      void subscribe(nodeId, 1);
+    }
+
+    return new Set(icdNodes.keys());
+  }
+
+  /**
+   * One-time host checks that explain the usual Thread problems in plain words (Linux only):
+   * no routable IPv6 address, or no route to a Thread device's prefix because the host ignores
+   * the border routers' route information (accept_ra_rt_info_max_plen).
+   */
+  private async runNetworkDiagnostics(icdNodeIds: ReadonlySet<string>): Promise<void> {
+    const matterInterface = (this.config as VthermoPlatformConfig).matterInterface?.trim() || undefined;
+    const ipv6Nodes = this.controllerClient.getNodeIpv6Addresses();
+    if (!ipv6Nodes.size) {
+      return;
+    }
+
+    if (!hasRoutableIpv6(networkInterfaces(), matterInterface)) {
+      this.log.warn(`Matter devices use IPv6, but ${matterInterface ?? "this host"} has no routable IPv6 address. `
+        + "Enable IPv6 (SLAAC) on the Homebridge network interface, otherwise IPv6 Matter devices are unreachable.");
+      return;
+    }
+
+    const routes = await readIpv6Routes();
+    if (!routes) {
+      return;
+    }
+
+    for (const [nodeId, addresses] of ipv6Nodes) {
+      const unrouted = addresses.filter((address) => !address.toLowerCase().startsWith("fe80:") && !hasSpecificRoute(address, routes));
+      if (unrouted.length && (icdNodeIds.has(nodeId) || unrouted.length === addresses.length)) {
+        this.log.warn(`Matter node ${nodeId}: no route to ${unrouted.join(", ")}. If this is a Thread device, the host does not `
+          + "accept the Thread border routers' route announcements. On Linux run "
+          + `"sysctl -w net.ipv6.conf.${matterInterface ?? "<interface>"}.accept_ra_rt_info_max_plen=64" and make it persistent.`);
+      }
+    }
+  }
+
   /** One subscription per node for all window sensors and relays; a change triggers the affected thermostats. */
   private async startSubscriptions(): Promise<void> {
     const byNode = new Map<string, Map<string, MatterEndpointReference>>();
@@ -203,6 +305,10 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
     };
 
     for (const [nodeId, references] of byNode) {
+      // Sleepy devices already have their own permanent subscription.
+      if (this.icdNodeIds.has(nodeId)) {
+        continue;
+      }
       void subscribe(nodeId, [...references.values()], 1);
     }
   }

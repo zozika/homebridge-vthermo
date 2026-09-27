@@ -179,8 +179,23 @@ class UiServer extends HomebridgePluginUiServer {
     return { result: data.result };
   }
 
+  /** The platform's matterInterface setting, so the settings page's own controller uses it too. */
+  async readMatterInterface() {
+    try {
+      const config = JSON.parse(await readFile(this.homebridgeConfigPath, "utf8"));
+      const block = (config.platforms ?? []).find((entry) => entry?.platform === "VthermoPlatform");
+      return typeof block?.matterInterface === "string" ? block.matterInterface : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async withClient(work) {
-    const client = new MatterControllerClient({ log: uiLogger, storagePath: this.storagePath });
+    const client = new MatterControllerClient({
+      log: uiLogger,
+      storagePath: this.storagePath,
+      matterInterface: await this.readMatterInterface(),
+    });
 
     try {
       return await work(client);

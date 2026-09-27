@@ -3,6 +3,13 @@
 (function (root) {
   const translations = {
     en: {
+      "app.matterInterface": "Matter network interface",
+      "app.matterInterfaceHelp": "Optional, e.g. br0. Limits Matter discovery to this interface so Docker/LXC bridges are not used. Empty = all interfaces. Restart the child bridge to apply.",
+      "paired.icd": "Sleepy device (ICD)",
+      "paired.icdDetails": "Battery device that sleeps between reports. Idle interval {sii}, active interval {sai}, stays awake {sat}. It is not polled; its values come from a Matter subscription.",
+      "discovered.icdHint": "Battery (sleepy) devices such as Thread door sensors: keep the device awake while pairing, e.g. open and close the door a few times. Pairing can take up to 3 minutes.",
+      "live.icdWaiting": "Sleepy device: waiting for its subscription (last report {age}). Values older than 15 minutes are ignored.",
+
       "live.title": "Live status",
       "live.updated": "Updated {age}",
       "live.secondsAgo": "{n} s ago",
@@ -141,6 +148,13 @@
     },
 
     hu: {
+      "app.matterInterface": "Matter hálózati interfész",
+      "app.matterInterfaceHelp": "Opcionális, pl. br0. A Matter felderítést erre az interfészre korlátozza, így a Docker/LXC bridge-eket nem használja. Üres = minden interfész. A child bridge újraindítása után lép életbe.",
+      "paired.icd": "Alvó eszköz (ICD)",
+      "paired.icdDetails": "Elemes eszköz, ami két jelentés között alszik. Alvási időköz {sii}, aktív időköz {sai}, ébren marad {sat}. Nem kérdezzük le, az értékei Matter feliratkozásból jönnek.",
+      "discovered.icdHint": "Elemes (alvó) eszközöknél, pl. Thread ajtóérzékelő: párosítás közben tartsd ébren, például nyisd-csukd az ajtót néhányszor. A párosítás akár 3 percig is tarthat.",
+      "live.icdWaiting": "Alvó eszköz: várakozás a feliratkozásra (utolsó jelentés: {age}). A 15 percnél régebbi értékeket figyelmen kívül hagyja.",
+
       "live.title": "Élő állapot",
       "live.updated": "Frissítve: {age}",
       "live.secondsAgo": "{n} mp-e",

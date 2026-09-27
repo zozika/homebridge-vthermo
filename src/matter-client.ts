@@ -6,6 +6,7 @@ import "@matter/nodejs";
 
 import {
   ControllerBehavior,
+  NetworkClient,
   LogDestination,
   LogFormat,
   Logger,
@@ -20,6 +21,8 @@ import {
 import { PeerAddress, PeerSet, PeerTimingParameters, SessionParameters } from "@matter/protocol";
 import { BasicInformationClient } from "@matter/main/behaviors/basic-information";
 import { BooleanStateClient } from "@matter/main/behaviors/boolean-state";
+import { DescriptorClient } from "@matter/main/behaviors/descriptor";
+import { IcdManagementClient } from "@matter/main/behaviors/icd-management";
 import { OnOffClient } from "@matter/main/behaviors/on-off";
 import { RelativeHumidityMeasurementClient } from "@matter/main/behaviors/relative-humidity-measurement";
 import { TemperatureMeasurementClient } from "@matter/main/behaviors/temperature-measurement";
@@ -40,6 +43,7 @@ import {
   type MatterClusterType,
   type MatterCommissionableNode,
   type MatterEndpointReference,
+  type MatterIcdInfo,
   type MatterNodeInventory,
   type MatterNodeProblem,
   type MatterOptionPurpose,
@@ -59,6 +63,65 @@ const CLUSTER_ATTRIBUTES: Record<MatterClusterType, { clusterId: number; attribu
   booleanState: { clusterId: 0x0045, attributeId: 0x0000 },
   onOff: { clusterId: 0x0006, attributeId: 0x0000 },
 };
+
+/** Attribute name on the client behavior state, for reading values the subscription stored. */
+const CLUSTER_ATTRIBUTE_NAMES: Record<MatterClusterType, string> = {
+  temperatureMeasurement: "measuredValue",
+  relativeHumidityMeasurement: "measuredValue",
+  onOff: "onOff",
+  booleanState: "stateValue",
+};
+
+const ICD_MANAGEMENT_CLUSTER_ID = 0x0046;
+/** Regular devices use ~300-500 ms; anything idling this long is a sleepy end device. */
+const ICD_IDLE_THRESHOLD_MS = 4_000;
+/** Values of a sleepy device stay valid this long after its subscription was last confirmed. */
+export const ICD_FRESHNESS_MS = 15 * 60_000;
+/** Retry interval for establishing a sleepy device's subscription. */
+export const ICD_SUBSCRIBE_RETRY_MS = 60_000;
+
+export interface IcdSignals {
+  serverList?: readonly number[];
+  idleIntervalMs?: number;
+  activeIntervalMs?: number;
+  activeThresholdMs?: number;
+  idleModeDurationSec?: number;
+  lit?: boolean;
+}
+
+/** Decides whether a node is an intermittently connected (sleepy) device. */
+export function detectIcd(signals: IcdSignals): MatterIcdInfo | undefined {
+  const hasIcdCluster = signals.serverList?.includes(ICD_MANAGEMENT_CLUSTER_ID) ?? false;
+  const sleepy = (signals.idleIntervalMs ?? 0) >= ICD_IDLE_THRESHOLD_MS;
+  if (!hasIcdCluster && !sleepy) {
+    return undefined;
+  }
+
+  return {
+    idleIntervalMs: signals.idleIntervalMs,
+    activeIntervalMs: signals.activeIntervalMs,
+    activeThresholdMs: signals.activeThresholdMs,
+    idleModeDurationMs: signals.idleModeDurationSec === undefined ? undefined : signals.idleModeDurationSec * 1000,
+    lit: signals.lit,
+  };
+}
+
+/** A request to a sleepy device may have to wait a full idle interval before it is even heard. */
+export function icdTimeoutMs(baseMs: number, icd: MatterIcdInfo | undefined): number {
+  if (!icd) {
+    return baseMs;
+  }
+  const idle = Math.max(icd.idleIntervalMs ?? 0, icd.idleModeDurationMs ?? 0);
+  return Math.max(baseMs, Math.round(idle * 1.5) + 5_000);
+}
+
+interface IcdTracking {
+  info: MatterIcdInfo;
+  active: boolean;
+  lastAliveAt?: number;
+  lastReportAt?: number;
+  detach: Array<() => void>;
+}
 
 const CLUSTER_BEHAVIORS: Record<MatterClusterType, unknown> = {
   temperatureMeasurement: TemperatureMeasurementClient,
@@ -117,6 +180,8 @@ export interface MatterClientOptions {
   log: MatterLogger;
   storagePath: string;
   verbose?: () => boolean;
+  /** Restrict Matter mDNS to one interface (e.g. "br0"); empty = all interfaces. */
+  matterInterface?: string;
 }
 
 export interface NodeAddressOverride {
@@ -125,7 +190,8 @@ export interface NodeAddressOverride {
 }
 
 export type EndpointReadResult =
-  | { ok: true; value: number | boolean }
+  /** `at`: when the value was last confirmed (sleepy devices report from their subscription). */
+  | { ok: true; value: number | boolean; at?: number }
   | { ok: false; error: string };
 
 export interface MatterNodeStatus {
@@ -135,6 +201,9 @@ export interface MatterNodeStatus {
   lastError?: string;
   lastSuccessAt?: number;
   problem?: MatterNodeProblem;
+  icd?: MatterIcdInfo;
+  subscriptionAlive?: boolean;
+  lastReportAt?: number;
 }
 
 export interface MatterUiSnapshot {
@@ -214,12 +283,16 @@ export class MatterControllerClient {
   private readonly peerKeys = new Map<string, string>();
   private readonly nodeNames = new Map<string, string>();
   private readonly peerProblems = new Map<string, { problem: MatterNodeProblem; at: number }>();
+  private readonly icdTracking = new Map<string, IcdTracking>();
+  private lastController?: ServerNode;
+  private readonly matterInterface?: string;
   private readonly diagnosticsDestination = `vthermo-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
   constructor(options: MatterClientOptions) {
     this.log = options.log;
     this.storagePath = options.storagePath;
     this.isVerbose = options.verbose ?? (() => false);
+    this.matterInterface = options.matterInterface?.trim() || undefined;
     this.guard = new NodeGuard({
       timeoutMs: OPERATION_TIMEOUT_MS,
       baseBackoffMs: BASE_BACKOFF_MS,
@@ -304,8 +377,207 @@ export class MatterControllerClient {
         lastError: health.lastError ? this.describeNodeError(nodeId, health.lastError) : undefined,
         lastSuccessAt: health.lastSuccessAt,
         problem: this.problemFor(nodeId),
+        ...this.icdStatus(nodeId),
       };
     });
+  }
+
+  private icdStatus(nodeId: string): Partial<Pick<MatterNodeStatus, "icd" | "subscriptionAlive" | "lastReportAt" | "online">> {
+    const tracking = this.icdTracking.get(nodeId);
+    if (!tracking) {
+      return {};
+    }
+    const alive = this.isIcdFresh(tracking);
+    return {
+      icd: tracking.info,
+      subscriptionAlive: tracking.active,
+      lastReportAt: tracking.lastReportAt ?? tracking.lastAliveAt,
+      // A sleepy device is "online" while its subscription is confirmed, not after a poll.
+      online: alive,
+    };
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Sleepy (ICD) devices
+  // ---------------------------------------------------------------------------------------------
+
+  /** ICD details of a node from its stored discovery data and IcdManagement cluster. */
+  getIcdInfo(node: ClientNode): MatterIcdInfo | undefined {
+    const commissioning = node.state.commissioning as {
+      sessionParameters?: { idleInterval?: number; activeInterval?: number; activeThreshold?: number };
+    };
+    const session = commissioning.sessionParameters;
+    const icdManagement = node.maybeStateOf(IcdManagementClient) as { idleModeDuration?: number; operatingMode?: number } | undefined;
+    const serverList = (node.maybeStateOf(DescriptorClient)?.serverList ?? []).map(Number);
+
+    return detectIcd({
+      serverList,
+      idleIntervalMs: session?.idleInterval === undefined ? undefined : Number(session.idleInterval),
+      activeIntervalMs: session?.activeInterval === undefined ? undefined : Number(session.activeInterval),
+      activeThresholdMs: session?.activeThreshold === undefined ? undefined : Number(session.activeThreshold),
+      idleModeDurationSec: icdManagement?.idleModeDuration,
+      lit: icdManagement?.operatingMode === undefined ? undefined : icdManagement.operatingMode === 1,
+    });
+  }
+
+  /** Stored IPv6 operational addresses per paired node (for the network diagnostics). */
+  getNodeIpv6Addresses(): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    const controller = this.controllerPromise ? this.lastController : undefined;
+    for (const node of controller ? this.getCommissionedNodes(controller) : []) {
+      const addresses = (node.state.commissioning.addresses ?? [])
+        .map((address) => (address as { ip?: string }).ip)
+        .filter((ip): ip is string => typeof ip === "string" && ip.includes(":"));
+      if (addresses.length) {
+        result.set(node.id, addresses);
+      }
+    }
+    return result;
+  }
+
+  /** Returns the ICD info of every given node that is a sleepy device. */
+  async findIcdNodes(nodeIds: Iterable<string>): Promise<Map<string, MatterIcdInfo>> {
+    const controller = await this.getOnlineController();
+    const result = new Map<string, MatterIcdInfo>();
+    for (const nodeId of nodeIds) {
+      const node = controller.peers.get(nodeId);
+      const info = node ? this.getIcdInfo(node) : undefined;
+      if (node && info) {
+        this.rememberNode(node);
+        result.set(nodeId, info);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Sleepy devices are not polled. matter.js keeps a sustained subscription (its native
+   * auto-subscribe, which also handles LIT check-in registration) and stores every report in the
+   * node state; readEndpoints() then answers from that state without network traffic.
+   * `onChange` fires on every reported change of the given endpoints and when the subscription
+   * comes up or is confirmed. Returns a function that removes the listeners.
+   */
+  async enableIcdSubscription(
+    nodeId: string,
+    references: MatterEndpointReference[],
+    onChange: (key: string | undefined) => void,
+  ): Promise<() => void> {
+    const controller = await this.getOnlineController();
+    const node = controller.peers.get(nodeId);
+    if (!node || node.state.commissioning.peerAddress === undefined) {
+      throw new Error(`Matter node ${nodeId} is not paired anymore.`);
+    }
+
+    this.rememberNode(node);
+    const previous = this.icdTracking.get(nodeId);
+    previous?.detach.forEach((detach) => detach());
+    const tracking: IcdTracking = {
+      info: this.getIcdInfo(node) ?? {},
+      active: previous?.active ?? false,
+      lastAliveAt: previous?.lastAliveAt,
+      lastReportAt: previous?.lastReportAt,
+      detach: [],
+    };
+    this.icdTracking.set(nodeId, tracking);
+
+    const listen = <T extends unknown[]>(observable: { on(cb: (...args: T) => void): void; off(cb: (...args: T) => void): void } | undefined, handler: (...args: T) => void) => {
+      if (!observable) {
+        return;
+      }
+      observable.on(handler);
+      tracking.detach.push(() => observable.off(handler));
+    };
+
+    const network = node.eventsOf(NetworkClient) as unknown as {
+      subscriptionStatusChanged?: { on(cb: (active: boolean) => void): void; off(cb: (active: boolean) => void): void };
+      subscriptionAlive?: { on(cb: () => void): void; off(cb: () => void): void };
+    };
+    listen(network.subscriptionStatusChanged, (active: boolean) => {
+      tracking.active = active;
+      if (active) {
+        tracking.lastAliveAt = Date.now();
+      }
+      this.debug(`[${getNodeName(node)}] sleepy device subscription ${active ? "established" : "lost"}.`);
+      onChange(undefined);
+    });
+    listen(network.subscriptionAlive, () => {
+      tracking.active = true;
+      tracking.lastAliveAt = Date.now();
+    });
+
+    for (const reference of references) {
+      let events: Record<string, { on(cb: () => void): void; off(cb: () => void): void } | undefined> | undefined;
+      try {
+        events = node.endpoints.for(reference.endpointId).eventsOf(CLUSTER_BEHAVIORS[reference.clusterType] as never) as never;
+      } catch {
+        events = undefined;
+      }
+      const key = referenceKey(reference);
+      listen(events?.[`${CLUSTER_ATTRIBUTE_NAMES[reference.clusterType]}$Changed`], () => {
+        tracking.lastReportAt = Date.now();
+        tracking.lastAliveAt = tracking.lastReportAt;
+        onChange(key);
+      });
+    }
+
+    await this.applyAddressOverride(node);
+    if (node.state.network.autoSubscribe !== true) {
+      await node.set({ network: { autoSubscribe: true } } as never);
+    }
+    if (!node.lifecycle.isOnline) {
+      await node.start();
+    }
+
+    return () => {
+      tracking.detach.forEach((detach) => detach());
+      tracking.detach = [];
+    };
+  }
+
+  private isIcdFresh(tracking: IcdTracking, now = Date.now()): boolean {
+    return tracking.active || (tracking.lastAliveAt !== undefined && now - tracking.lastAliveAt < ICD_FRESHNESS_MS);
+  }
+
+  /** Values of a sleepy device from the state its subscription keeps up to date. */
+  private async readIcdFromState(nodeId: string, references: MatterEndpointReference[]): Promise<Map<string, EndpointReadResult>> {
+    const results = new Map<string, EndpointReadResult>();
+    const tracking = this.icdTracking.get(nodeId)!;
+    const controller = await this.getOnlineController();
+    const node = controller.peers.get(nodeId);
+    const now = Date.now();
+    const name = this.nodeNames.get(nodeId) ?? nodeId;
+
+    for (const reference of references) {
+      const key = referenceKey(reference);
+      if (!node) {
+        results.set(key, { ok: false, error: `Matter node ${nodeId} is not paired anymore. Pair it again in the Vthermo settings.` });
+        continue;
+      }
+
+      if (!this.isIcdFresh(tracking, now)) {
+        const since = tracking.lastAliveAt === undefined ? "since startup" : `for ${Math.round((now - tracking.lastAliveAt) / 60_000)} min`;
+        results.set(key, { ok: false, error: `${name} (sleepy device) has not reported ${since}; waiting for its subscription.` });
+        continue;
+      }
+
+      let value: unknown;
+      try {
+        const state = node.endpoints.for(reference.endpointId).maybeStateOf(CLUSTER_BEHAVIORS[reference.clusterType] as never) as Record<string, unknown> | undefined;
+        value = state?.[CLUSTER_ATTRIBUTE_NAMES[reference.clusterType]];
+      } catch {
+        value = undefined;
+      }
+
+      if (value === undefined || value === null) {
+        results.set(key, { ok: false, error: `${describeReference(reference)}: waiting for the first report from the sleepy device.` });
+        continue;
+      }
+
+      const converted = this.convertValue(reference, { value });
+      results.set(key, converted.ok ? { ...converted, at: tracking.active ? now : tracking.lastAliveAt } : converted);
+    }
+
+    return results;
   }
 
   /** Ids of all nodes currently paired with this controller. */
@@ -425,6 +697,13 @@ export class MatterControllerClient {
     }
 
     await Promise.all([...byNode.entries()].map(async ([nodeId, nodeReferences]) => {
+      if (this.icdTracking.has(nodeId)) {
+        for (const [key, result] of await this.readIcdFromState(nodeId, nodeReferences)) {
+          results.set(key, result);
+        }
+        return;
+      }
+
       try {
         const values = await this.guard.run(
           nodeId,
@@ -456,6 +735,7 @@ export class MatterControllerClient {
   }
 
   private async switchWithGuard(reference: MatterEndpointReference, enabled: boolean): Promise<void> {
+    const icd = this.icdTracking.get(reference.nodeId)?.info;
     await this.guard.run(
       reference.nodeId,
       `switching ${describeReference(reference)} ${enabled ? "on" : "off"}`,
@@ -474,6 +754,8 @@ export class MatterControllerClient {
 
         await command();
       }),
+      icdTimeoutMs(OPERATION_TIMEOUT_MS, icd),
+      icd === undefined,
     );
   }
 
@@ -549,18 +831,24 @@ export class MatterControllerClient {
     const discoveryOptions: Record<string, unknown> = {
       timeout: Seconds(60),
     };
+    // Sleepy devices need many slow round trips (PASE, attestation, CASE); give them time.
     const commissionOptions: Record<string, unknown> = {
       passcode: parsed.passcode,
-      timeout: Seconds(60),
+      timeout: Seconds(180),
       autoSubscribe: false,
     };
 
     if (deviceIdentifier) {
       discoveryOptions.instanceId = deviceIdentifier;
-    } else if (parsed.longDiscriminator !== undefined) {
-      discoveryOptions.longDiscriminator = parsed.longDiscriminator;
-    } else if (parsed.shortDiscriminator !== undefined) {
-      discoveryOptions.shortDiscriminator = parsed.shortDiscriminator;
+    } else {
+      const open = await this.findOpenCommissioningWindow(controller, parsed);
+      if (open) {
+        discoveryOptions.instanceId = open;
+      } else if (parsed.longDiscriminator !== undefined) {
+        discoveryOptions.longDiscriminator = parsed.longDiscriminator;
+      } else if (parsed.shortDiscriminator !== undefined) {
+        discoveryOptions.shortDiscriminator = parsed.shortDiscriminator;
+      }
     }
 
     const node = await controller.peers.locate(discoveryOptions as never);
@@ -573,6 +861,34 @@ export class MatterControllerClient {
       this.disableAutoSubscribe(node);
     } finally {
       node.start = originalStart;
+    }
+  }
+
+  /**
+   * Thread devices shared from Apple Home leave stale commissionable records (CM=0) behind for
+   * hours via the border router's SRP lease. Prefer the record whose commissioning window is open.
+   */
+  private async findOpenCommissioningWindow(controller: ServerNode, parsed: PairingCodeDetails): Promise<string | undefined> {
+    if (parsed.longDiscriminator === undefined && parsed.shortDiscriminator === undefined) {
+      return undefined;
+    }
+
+    try {
+      const found = await controller.peers.discover({
+        timeout: Seconds(8),
+        ...(parsed.longDiscriminator !== undefined ? { longDiscriminator: parsed.longDiscriminator } : { shortDiscriminator: parsed.shortDiscriminator }),
+      } as never);
+      const open = found.filter((node) => {
+        const mode = (node.state.commissioning as { commissioningMode?: number }).commissioningMode;
+        return mode !== undefined && mode !== 0;
+      });
+      if (found.length > open.length) {
+        this.log.info(`Ignoring ${found.length - open.length} stale Matter pairing record(s) with a closed commissioning window.`);
+      }
+      return open[0]?.state.commissioning.deviceIdentifier;
+    } catch (error) {
+      this.debug(`Commissionable discovery by discriminator failed: ${errorMessage(error)}`);
+      return undefined;
     }
   }
 
@@ -620,12 +936,14 @@ export class MatterControllerClient {
         addresses: (node.state.commissioning.addresses ?? []).map((address) => formatAddress(address)),
       };
 
+      const icd = this.getIcdInfo(node);
       try {
         const inventory = await this.guard.run(
           node.id,
           `building the endpoint inventory of ${base.name}`,
           () => this.buildInventory(node),
-          INVENTORY_TIMEOUT_MS,
+          icdTimeoutMs(INVENTORY_TIMEOUT_MS, icd),
+          icd === undefined,
         );
 
         for (const list of Object.keys(collected) as Array<keyof InventoryLists>) {
@@ -644,6 +962,7 @@ export class MatterControllerClient {
           endpointsDiscovered: inventory.endpointsDiscovered,
           temperatureSources: inventory.temperatureSources.length,
           humiditySources: inventory.humiditySources.length,
+          icd: this.getIcdInfo(node),
           switchTargets: inventory.switchTargets.length,
           contactSensors: inventory.contactSensors.length,
         } satisfies MatterPairedNodeSummary;
@@ -653,6 +972,7 @@ export class MatterControllerClient {
           reachable: false,
           error: this.describeNodeError(node.id, error),
           problem: this.problemFor(node.id),
+          icd,
           endpointsDiscovered: 0,
           temperatureSources: 0,
           humiditySources: 0,
@@ -953,7 +1273,8 @@ export class MatterControllerClient {
   }
 
   private disableAutoSubscribe(node: ClientNode): void {
-    if (node.state.network.autoSubscribe === false) {
+    // Sleepy devices depend on matter.js' own subscription (see enableIcdSubscription).
+    if (this.icdTracking.has(node.id) || node.state.network.autoSubscribe === false) {
       return;
     }
 
@@ -1027,6 +1348,7 @@ export class MatterControllerClient {
     }
 
     const controller = await this.controllerPromise;
+    this.lastController = controller;
     for (const node of this.getCommissionedNodes(controller)) {
       this.disableAutoSubscribe(node);
       // Fixed addresses must be stored before the controller starts: matter.js loads each peer's
@@ -1062,6 +1384,10 @@ export class MatterControllerClient {
     const environment = NodeJsEnvironment();
     environment.vars.set("storage.path", join(this.storagePath, MATTER_STORAGE_DIRECTORY));
     environment.vars.set("storage.driver", "sqlite");
+    if (this.matterInterface) {
+      // Keeps Matter discovery off Docker/LXC bridges and other interfaces that cannot reach devices.
+      environment.vars.set("mdns.networkInterface", this.matterInterface);
+    }
 
     const controllerType = ServerNode.RootEndpoint.with(ControllerBehavior);
 

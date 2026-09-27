@@ -57,6 +57,8 @@ export interface MatterPairedNodeSummary {
   error?: string;
   /** Machine-readable reason, e.g. "notPaired" when the device no longer knows this controller. */
   problem?: MatterNodeProblem;
+  /** Set for sleepy (ICD) devices. */
+  icd?: MatterIcdInfo;
   endpointsDiscovered: number;
   temperatureSources: number;
   humiditySources: number;
@@ -65,6 +67,20 @@ export interface MatterPairedNodeSummary {
 }
 
 export type MatterNodeProblem = "notPaired";
+
+/** Intermittently connected (sleepy) device, e.g. a battery Thread sensor like IKEA MYGGBETT. */
+export interface MatterIcdInfo {
+  /** Session idle interval (SII): how often a sleeping device polls its parent. */
+  idleIntervalMs?: number;
+  /** Session active interval (SAI). */
+  activeIntervalMs?: number;
+  /** Active threshold (SAT): how long it stays awake after the last traffic. */
+  activeThresholdMs?: number;
+  /** IcdManagement idleModeDuration in ms, if the cluster is present. */
+  idleModeDurationMs?: number;
+  /** Device runs in Long Idle Time mode (check-in based). */
+  lit?: boolean;
+}
 
 export interface MatterCommissionableNode {
   deviceIdentifier: string;
