@@ -17,7 +17,7 @@ import {
   type ClientNode,
   type ServerAddressUdp,
 } from "@matter/main";
-import { PeerAddress, PeerSet, SessionParameters } from "@matter/protocol";
+import { PeerAddress, PeerSet, PeerTimingParameters, SessionParameters } from "@matter/protocol";
 import { BasicInformationClient } from "@matter/main/behaviors/basic-information";
 import { BooleanStateClient } from "@matter/main/behaviors/boolean-state";
 import { OnOffClient } from "@matter/main/behaviors/on-off";
@@ -75,6 +75,19 @@ const INVENTORY_KINDS: Array<{ clusterType: MatterClusterType; purpose: MatterOp
 ];
 
 type InventoryLists = Pick<MatterNodeInventory, "temperatureSources" | "humiditySources" | "switchTargets" | "contactSensors">;
+
+/**
+ * matter.js 0.17 tries IPv6 addresses first and waits 45 s before trying the next address of a
+ * device, and 2 min after errors such as ENETUNREACH. With a hub on another VLAN that advertises an
+ * unroutable IPv6 ULA address, the working IPv4 address was never reached within our 20 s read
+ * timeout. Try the next address quickly instead; a device that answers still wins immediately.
+ */
+function tuneConnectionTiming(): void {
+  const defaults = PeerTimingParameters.defaults as { -readonly [K in keyof PeerTimingParameters]: PeerTimingParameters[K] };
+  defaults.delayBeforeNextAddress = Seconds(3);
+  defaults.delayAfterUnhandledError = Seconds(30);
+  defaults.delayAfterNetworkError = Seconds(10);
+}
 
 /** How long a "device rejected our pairing" diagnosis stays valid. */
 const PROBLEM_TTL_MS = 10 * 60_000;
@@ -220,6 +233,7 @@ export class MatterControllerClient {
       },
     });
     installMatterCompatibilityPatches(this.log);
+    tuneConnectionTiming();
     this.applyMatterLogLevel();
     this.installDiagnostics();
   }
@@ -354,6 +368,15 @@ export class MatterControllerClient {
 
       this.addressOverrides.set(override.nodeId, address);
       this.log.info(`Matter node ${override.nodeId} will use the fixed address ${ServerAddress.urlFor(address)}.`);
+    }
+  }
+
+  /** After a device was paired again, its fixed address belongs to the new node id. */
+  moveAddressOverride(fromNodeId: string, toNodeId: string): void {
+    const address = this.addressOverrides.get(fromNodeId);
+    if (address && !this.addressOverrides.has(toNodeId)) {
+      this.addressOverrides.set(toNodeId, address);
+      this.log.info(`Matter node ${toNodeId} (paired again) will use the fixed address ${ServerAddress.urlFor(address)}.`);
     }
   }
 

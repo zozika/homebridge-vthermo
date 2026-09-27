@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.1
+
+### Fixed
+- Hubs on another VLAN were unreachable after the matter.js 0.17 update: 0.17 tries IPv6
+  addresses first and waits 45 s before the next address (2 min after ENETUNREACH), so the working
+  IPv4 address was never tried within the read timeout. The next address is now tried after 3 s.
+- The fixed IP address of a device moves to its new node id when the device is paired again
+  (settings page and runtime).
+
 ## 2.2.0
 
 ### Added

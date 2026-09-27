@@ -53,3 +53,9 @@ test("rebindInPlace updates the shared object and counts changes", () => {
   assert.equal(holder[0].nodeId, "peer2");
   assert.equal(holder[0].endpointId, 5);
 });
+
+test("rebindInPlace reports which node ids moved", () => {
+  const moves = new Map();
+  rebindInPlace([ref("peer1", 1, "onOff", { uniqueId: "r" })], [option(ref("peer2", 7, "onOff", { uniqueId: "r" }))], paired, moves);
+  assert.deepEqual([...moves], [["peer1", "peer2"]]);
+});

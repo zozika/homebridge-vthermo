@@ -46,11 +46,15 @@ export function findRebindTarget(
   return reference.offset === undefined ? { ...match } : { ...match, offset: reference.offset };
 }
 
-/** Replaces, in place, every reference that can be rebound. Returns how many were changed. */
+/**
+ * Replaces, in place, every reference that can be rebound. Returns how many were changed; the
+ * optional `nodeMoves` map collects old node id -> new node id (e.g. to move fixed addresses).
+ */
 export function rebindInPlace(
   references: Array<MatterEndpointReference | undefined>,
   options: readonly MatterOption[],
   pairedNodeIds: ReadonlySet<string>,
+  nodeMoves?: Map<string, string>,
 ): number {
   let changed = 0;
   for (const reference of references) {
@@ -63,6 +67,7 @@ export function rebindInPlace(
       continue;
     }
 
+    nodeMoves?.set(reference.nodeId, target.nodeId);
     for (const key of Object.keys(reference) as Array<keyof MatterEndpointReference>) {
       delete reference[key];
     }

@@ -1110,15 +1110,31 @@
           ...state.snapshot.temperatureSources, ...state.snapshot.humiditySources,
           ...state.snapshot.switchTargets, ...state.snapshot.contactSensors,
         ];
+        const nodeMoves = new Map();
         const rebind = (reference) => (reference && window.VthermoRebind.findRebindTarget(reference, options, pairedNodeIds)) || reference;
         let changed = 0;
-        const count = (before, after) => { if (before !== after) changed += 1; return after; };
+        const count = (before, after) => {
+          if (before !== after) {
+            changed += 1;
+            nodeMoves.set(before.nodeId, after.nodeId);
+          }
+          return after;
+        };
 
         for (const thermostat of state.config.thermostats) {
           thermostat.temperatureSources = thermostat.temperatureSources.map((reference) => count(reference, rebind(reference)));
           thermostat.contactSensors = thermostat.contactSensors.map((reference) => count(reference, rebind(reference)));
           thermostat.switchTarget = count(thermostat.switchTarget, rebind(thermostat.switchTarget));
           thermostat.humiditySource = count(thermostat.humiditySource, rebind(thermostat.humiditySource));
+        }
+
+        // The fixed IP of the old pairing belongs to the re-paired node now.
+        for (const [fromNodeId, toNodeId] of nodeMoves) {
+          const address = getAddressOverride(fromNodeId);
+          if (address && !getAddressOverride(toNodeId)) {
+            setAddressOverride(toNodeId, address);
+            setAddressOverride(fromNodeId, "");
+          }
         }
 
         if (changed) {

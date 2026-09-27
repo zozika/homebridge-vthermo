@@ -142,18 +142,23 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       ...snapshot.contactSensors,
     ];
 
+    const nodeMoves = new Map<string, string>();
     for (const thermostat of this.thermostatConfigs) {
       const changed = rebindInPlace([
         ...thermostat.temperatureSources,
         ...thermostat.contactSensors,
         thermostat.switchTarget,
         thermostat.humiditySource,
-      ], options, pairedNodeIds);
+      ], options, pairedNodeIds, nodeMoves);
 
       if (changed) {
         this.log.warn(`[${thermostat.name}] ${changed} device(s) were paired again under a new Matter node; `
           + "reconnected them automatically. Open the Vthermo settings and save to store this permanently.");
       }
+    }
+
+    for (const [fromNodeId, toNodeId] of nodeMoves) {
+      this.controllerClient.moveAddressOverride(fromNodeId, toNodeId);
     }
   }
 

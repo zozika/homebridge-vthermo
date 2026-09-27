@@ -112,3 +112,16 @@ test("recognises a device that lost our pairing from the matter.js log", async (
   assert.equal(client.problemFor("peer2"), undefined);
   await client.close();
 });
+
+test("tries the next device address quickly (matter.js 0.17 defaults to 45 s)", async () => {
+  const { MatterControllerClient } = await import("../dist/matter-client.js");
+  const { PeerTimingParameters } = await import("@matter/protocol");
+  const client = new MatterControllerClient({ log: { info() {}, warn() {}, error() {}, debug() {} }, storagePath: "/tmp/vthermo-timing" });
+  assert.equal(Number(PeerTimingParameters.defaults.delayBeforeNextAddress), 3_000);
+  assert.equal(Number(PeerTimingParameters.defaults.delayAfterUnhandledError), 30_000);
+
+  client.setAddressOverrides([{ nodeId: "peer1", address: "192.168.120.10" }]);
+  client.moveAddressOverride("peer1", "peer2");
+  assert.equal(client.addressOverrides.get("peer2").ip, "192.168.120.10");
+  await client.close();
+});
