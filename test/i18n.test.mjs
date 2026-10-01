@@ -42,7 +42,7 @@ test("every demand reason and relay wait state has a label", () => {
   for (const reason of ["heat", "frost", "idle", "off", "window", "no-temperature"]) {
     assert.ok(`live.reason.${reason}` in en, reason);
   }
-  for (const wait of ["min-on-wait", "min-off-wait", "cut-out-wait", "cut-out-no-retry"]) {
+  for (const wait of ["min-on-wait", "min-off-wait", "cut-out-wait", "cut-out-no-retry", "not-confirmed"]) {
     assert.ok(`live.wait.${wait}` in en, wait);
   }
 });

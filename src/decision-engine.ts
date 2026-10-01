@@ -134,13 +134,25 @@ export interface RelayPlanInput {
   minOffMs?: number;
   /** When we last successfully switched the relay. */
   lastSwitchAt?: number;
+  /**
+   * Whether a read has confirmed the relay on since our last "on" command. Bridges such as the
+   * Aqara hub accept a command although the Zigbee relay behind them did not switch; that is a
+   * failed command, not a cut-out, and is simply sent again.
+   */
+  confirmedOn?: boolean;
+  /** "On" commands sent since the relay was last confirmed on. */
+  unconfirmedAttempts?: number;
   now: number;
 }
+
+/** Total "on" commands (first + repeats) for a relay that does not report on, before giving up. */
+export const MAX_UNCONFIRMED_ON_ATTEMPTS = 3;
 
 export interface RelayPlan {
   action: RelayAction;
   cutOutSince?: number;
-  reason: "in-sync" | "turn-on" | "turn-off" | "cut-out-wait" | "cut-out-retry" | "cut-out-no-retry" | "min-on-wait" | "min-off-wait";
+  reason: "in-sync" | "turn-on" | "turn-off" | "cut-out-wait" | "cut-out-retry" | "cut-out-no-retry" | "min-on-wait" | "min-off-wait"
+    | "not-confirmed-retry";
   /** For the min-on/off waits: how long until the relay may switch. */
   waitMs?: number;
 }
@@ -182,6 +194,11 @@ export function planRelayAction(input: RelayPlanInput): RelayPlan {
     }
 
     return { action: "on", reason: "turn-on" };
+  }
+
+  // We switched it on but it never reported on: the command did not take effect. Send it again.
+  if (input.confirmedOn === false && (input.unconfirmedAttempts ?? 0) < MAX_UNCONFIRMED_ON_ATTEMPTS) {
+    return { action: "on", reason: "not-confirmed-retry" };
   }
 
   const cutOutSince = input.cutOutSince ?? input.now;

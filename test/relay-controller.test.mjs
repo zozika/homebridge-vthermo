@@ -62,6 +62,9 @@ test("detects a cut-out and retries after the delay", async () => {
 
   await relay.update("a", retry);
   advance(30_000);
+  // The relay was confirmed on, so a later "off" is a real cut-out.
+  await relay.update("a", retry, { on: true, at: now() });
+  advance(30_000);
   await relay.update("a", retry, { on: false, at: now() });
   assert.deepEqual(commands, [true]);
 
@@ -133,4 +136,36 @@ test("the startup sync of an unknown relay does not start the minimum off-time",
   advance(1_000);
   await relay.update("a", { ...demand, heat: true });
   assert.deepEqual(commands, [false, true]);
+});
+
+test("an on command that did not take effect is repeated, then reported", async () => {
+  const warnings = [];
+  let now = 100_000;
+  const commands = [];
+  const relay = new RelayController(
+    reference,
+    { setSwitchState: async (_reference, enabled) => { commands.push(enabled); } },
+    { info: () => undefined, warn: (m) => warnings.push(m), debug: () => undefined },
+    () => now,
+  );
+  relay.register("a");
+  const read = (on) => ({ on, at: now });
+
+  await relay.update("a", heat, read(false));
+  for (let i = 0; i < 5; i++) {
+    now += 30_000;
+    await relay.update("a", heat, read(false));
+  }
+  // First command + 2 repeats, then it stops and warns (retry disabled).
+  assert.deepEqual(commands, [true, true, true]);
+  assert.match(warnings.at(-1), /did not switch on after 3 commands/);
+  assert.equal(relay.waitingReason, "not-confirmed");
+
+  // Once it reports on, a later off is a genuine cut-out again.
+  now += 30_000;
+  await relay.update("a", { ...heat, retryEnabled: true, retryDelayMs: 0 }, read(true));
+  now += 30_000;
+  await relay.update("a", heat, read(false));
+  assert.equal(relay.waitingReason, "cut-out-no-retry");
+  assert.deepEqual(commands, [true, true, true]);
 });

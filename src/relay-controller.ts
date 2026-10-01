@@ -1,4 +1,4 @@
-import { planRelayAction } from "./decision-engine.js";
+import { MAX_UNCONFIRMED_ON_ATTEMPTS, planRelayAction } from "./decision-engine.js";
 import type { MatterEndpointReference } from "./matter-model.js";
 
 /** Ignore relay reads that started before (or right after) our last command reached the device. */
@@ -41,6 +41,9 @@ export class RelayController {
   private lastSwitchAt?: number;
   private cutOutSince?: number;
   private lastReason?: string;
+  /** Whether a read confirmed the relay on after our last "on" command (undefined = no such command). */
+  private confirmedOn?: boolean;
+  private unconfirmedAttempts = 0;
   /** Action whose last attempt failed; repeats are logged quietly until it succeeds. */
   private failedAction?: boolean;
   private chain: Promise<unknown> = Promise.resolve();
@@ -73,6 +76,9 @@ export class RelayController {
 
   /** Why the relay is not following the demand right now, if it is waiting (for the status page). */
   get waitingReason(): string | undefined {
+    if (this.lastReason === "cut-out-no-retry" && this.confirmedOn === false) {
+      return "not-confirmed";
+    }
     return this.lastReason === "min-on-wait" || this.lastReason === "min-off-wait"
       || this.lastReason === "cut-out-wait" || this.lastReason === "cut-out-no-retry"
       ? this.lastReason
@@ -94,6 +100,10 @@ export class RelayController {
         this.log.debug(`${this.label} reported ${observation.on ? "on" : "off"} via Matter.`);
       }
       this.observedOn = observation.on;
+      if (observation.on && this.commandedOn === true) {
+        this.confirmedOn = true;
+        this.unconfirmedAttempts = 0;
+      }
     }
 
     const all = [...this.demands.values()];
@@ -110,12 +120,17 @@ export class RelayController {
       cutOutSince: this.cutOutSince,
       retryEnabled: retrying.length > 0,
       retryDelayMs: retrying.length ? Math.min(...retrying.map((entry) => entry.retryDelayMs)) : 0,
+      confirmedOn: this.confirmedOn,
+      unconfirmedAttempts: this.unconfirmedAttempts,
       now: this.now(),
     });
 
     this.cutOutSince = plan.cutOutSince;
     if (plan.reason !== this.lastReason) {
-      if (plan.reason === "cut-out-no-retry") {
+      if (plan.reason === "cut-out-no-retry" && this.confirmedOn === false) {
+        this.log.warn(`${this.label} did not switch on after ${this.unconfirmedAttempts} commands although the hub accepted them. `
+          + "Check the device in its own app (offline, child lock, power-on behaviour). Enable relay retry to keep trying.");
+      } else if (plan.reason === "cut-out-no-retry") {
         this.log.warn(`${this.label} switched off by itself while heating is needed. Relay retry is disabled, leaving it off.`);
       } else if (plan.reason === "cut-out-wait") {
         this.log.warn(`${this.label} switched off by itself while heating is needed. Retrying later.`);
@@ -131,7 +146,12 @@ export class RelayController {
     }
 
     const enable = plan.action === "on";
-    const message = `Turning ${this.label} ${enable ? "on" : "off"}${plan.reason === "cut-out-retry" ? " again after a cut-out" : ""}.`;
+    const suffix = plan.reason === "cut-out-retry"
+      ? " again after a cut-out"
+      : plan.reason === "not-confirmed-retry"
+        ? ` again: it did not report on after the last command (${this.unconfirmedAttempts + 1}/${MAX_UNCONFIRMED_ON_ATTEMPTS})`
+        : "";
+    const message = `Turning ${this.label} ${enable ? "on" : "off"}${suffix}.`;
     if (this.failedAction === enable) {
       this.log.debug(`${message} (retry)`);
     } else {
@@ -147,6 +167,13 @@ export class RelayController {
     }
 
     this.failedAction = undefined;
+    if (enable) {
+      this.unconfirmedAttempts = plan.reason === "not-confirmed-retry" ? this.unconfirmedAttempts + 1 : 1;
+      this.confirmedOn = false;
+    } else {
+      this.unconfirmedAttempts = 0;
+      this.confirmedOn = undefined;
+    }
     this.commandedOn = enable;
     this.observedOn = enable;
     this.lastCommandAt = this.now();

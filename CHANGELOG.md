@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.3.2
+
+### Fixed
+- **Heating stayed off although the thermostat demanded heat** ("relay cut out, retry disabled").
+  Bridges such as the Aqara hub accept an "on" command even when the Zigbee relay behind them does
+  not switch. This was mistaken for a boiler cut-out, and with relay retry disabled the relay was
+  left off until the demand went away. A relay that has not been confirmed on since the last
+  command is now commanded again (3 attempts in total, one per control cycle); only a relay that
+  was confirmed on and later reports off counts as a cut-out. After 3 unsuccessful attempts the log
+  and the live status say so.
+
 ## 2.3.1
 
 ### Fixed
