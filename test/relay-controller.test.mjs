@@ -138,7 +138,7 @@ test("the startup sync of an unknown relay does not start the minimum off-time",
   assert.deepEqual(commands, [false, true]);
 });
 
-test("an on command that did not take effect is repeated, then reported", async () => {
+test("a relay that switches off right after switching on is left off (boiler cut its power)", async () => {
   const warnings = [];
   let now = 100_000;
   const commands = [];
@@ -156,16 +156,15 @@ test("an on command that did not take effect is repeated, then reported", async 
     now += 30_000;
     await relay.update("a", heat, read(false));
   }
-  // First command + 2 repeats, then it stops and warns (retry disabled).
-  assert.deepEqual(commands, [true, true, true]);
-  assert.match(warnings.at(-1), /did not switch on after 3 commands/);
+  // Exactly one "on": no repeated burner starts while the water is hot.
+  assert.deepEqual(commands, [true]);
   assert.equal(relay.waitingReason, "not-confirmed");
+  assert.match(warnings.at(-1), /reported off right after it was switched on/);
 
-  // Once it reports on, a later off is a genuine cut-out again.
+  // When the demand goes away and comes back, it is switched on again normally.
   now += 30_000;
-  await relay.update("a", { ...heat, retryEnabled: true, retryDelayMs: 0 }, read(true));
+  await relay.update("a", idle, read(false));
   now += 30_000;
   await relay.update("a", heat, read(false));
-  assert.equal(relay.waitingReason, "cut-out-no-retry");
-  assert.deepEqual(commands, [true, true, true]);
+  assert.deepEqual(commands, [true, true]);
 });

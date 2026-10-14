@@ -968,7 +968,7 @@
                 </span>
                 <span class="help">${escapeHtml(t("field.relayRetryHelp"))}</span>
               </label>
-              ${numberField(thermostat, "relayRetryDelayMinutes", "field.retryDelay", `step="1" min="1" max="180" ${thermostat.relayRetryEnabled ? "" : "disabled"}`)}
+              ${numberField(thermostat, "relayRetryDelayMinutes", "field.retryDelay", `step="1" min="5" max="180" ${thermostat.relayRetryEnabled ? "" : "disabled"}`)}
               ${numberField(thermostat, "defaultTargetTemperature", "field.defaultTarget", 'step="0.5" min="5" max="35"')}
               ${numberField(thermostat, "minTargetTemperature", "field.minTarget", 'step="0.5" min="5" max="35"')}
               ${numberField(thermostat, "maxTargetTemperature", "field.maxTarget", 'step="0.5" min="5" max="35"')}

@@ -131,7 +131,7 @@
       "relayRetryDelayMinutes": {
         "type": "integer",
         "default": 5,
-        "minimum": 1,
+        "minimum": 5,
         "maximum": 180
       },
       "defaultTargetTemperature": {
@@ -223,7 +223,7 @@
           "relayRetryDelayMinutes": {
             "type": "integer",
             "default": 5,
-            "minimum": 1,
+            "minimum": 5,
             "maximum": 180
           },
           "defaultTargetTemperature": {

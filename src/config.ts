@@ -104,6 +104,7 @@ const MAX_CHECK_INTERVAL_SECONDS = 3600;
 const MIN_ALLOWED_TARGET_TEMPERATURE = 5;
 const MAX_ALLOWED_TARGET_TEMPERATURE = 35;
 const MIN_TARGET_RANGE = 1;
+const MIN_RELAY_RETRY_DELAY_MINUTES = 5;
 const MAX_MIN_RUN_MINUTES = 60;
 const MIN_FROST_TEMPERATURE = 3;
 const MAX_FROST_TEMPERATURE = 15;
@@ -347,9 +348,10 @@ function resolveSingleThermostat(
     ? thermostat.relayRetryEnabled
     : DEFAULT_RELAY_RETRY_ENABLED;
 
+  // At least 5 minutes: re-arming the boiler right after it cut the relay makes the burner short-cycle.
   const relayRetryDelayMinutes = clamp(
     Math.round(asNumber(thermostat.relayRetryDelayMinutes) ?? DEFAULT_RELAY_RETRY_DELAY_MINUTES),
-    1,
+    MIN_RELAY_RETRY_DELAY_MINUTES,
     180,
   );
 

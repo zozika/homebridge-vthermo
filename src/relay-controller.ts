@@ -1,4 +1,4 @@
-import { MAX_UNCONFIRMED_ON_ATTEMPTS, planRelayAction } from "./decision-engine.js";
+import { planRelayAction } from "./decision-engine.js";
 import type { MatterEndpointReference } from "./matter-model.js";
 
 /** Ignore relay reads that started before (or right after) our last command reached the device. */
@@ -41,9 +41,11 @@ export class RelayController {
   private lastSwitchAt?: number;
   private cutOutSince?: number;
   private lastReason?: string;
-  /** Whether a read confirmed the relay on after our last "on" command (undefined = no such command). */
+  /**
+   * Whether a read confirmed the relay on after our last "on" command (undefined = no such command).
+   * Only used to word the status: off-before-seen-on is typically the boiler cutting the relay.
+   */
   private confirmedOn?: boolean;
-  private unconfirmedAttempts = 0;
   /** Action whose last attempt failed; repeats are logged quietly until it succeeds. */
   private failedAction?: boolean;
   private chain: Promise<unknown> = Promise.resolve();
@@ -102,12 +104,19 @@ export class RelayController {
       this.observedOn = observation.on;
       if (observation.on && this.commandedOn === true) {
         this.confirmedOn = true;
-        this.unconfirmedAttempts = 0;
       }
     }
 
     const all = [...this.demands.values()];
     const demanding = all.filter((entry) => entry.heat);
+
+    // The relay is off and nobody wants heat any more: forget our old "on" command, so the next
+    // demand switches it on normally instead of being treated as the same cut-out forever.
+    if (!demanding.length && this.observedOn === false && this.commandedOn === true) {
+      this.commandedOn = false;
+      this.confirmedOn = undefined;
+      this.cutOutSince = undefined;
+    }
     const retrying = demanding.filter((entry) => entry.retryEnabled);
     const plan = planRelayAction({
       // A shared relay protects the boiler with the strictest setting of its thermostats.
@@ -120,16 +129,15 @@ export class RelayController {
       cutOutSince: this.cutOutSince,
       retryEnabled: retrying.length > 0,
       retryDelayMs: retrying.length ? Math.min(...retrying.map((entry) => entry.retryDelayMs)) : 0,
-      confirmedOn: this.confirmedOn,
-      unconfirmedAttempts: this.unconfirmedAttempts,
       now: this.now(),
     });
 
     this.cutOutSince = plan.cutOutSince;
     if (plan.reason !== this.lastReason) {
       if (plan.reason === "cut-out-no-retry" && this.confirmedOn === false) {
-        this.log.warn(`${this.label} did not switch on after ${this.unconfirmedAttempts} commands although the hub accepted them. `
-          + "Check the device in its own app (offline, child lock, power-on behaviour). Enable relay retry to keep trying.");
+        this.log.warn(`${this.label} reported off right after it was switched on (before it was ever seen on). `
+          + "This is normal when the boiler cuts the relay because the water is already hot; leaving it off. "
+          + "If heating never starts, check the relay in its own app.");
       } else if (plan.reason === "cut-out-no-retry") {
         this.log.warn(`${this.label} switched off by itself while heating is needed. Relay retry is disabled, leaving it off.`);
       } else if (plan.reason === "cut-out-wait") {
@@ -146,11 +154,7 @@ export class RelayController {
     }
 
     const enable = plan.action === "on";
-    const suffix = plan.reason === "cut-out-retry"
-      ? " again after a cut-out"
-      : plan.reason === "not-confirmed-retry"
-        ? ` again: it did not report on after the last command (${this.unconfirmedAttempts + 1}/${MAX_UNCONFIRMED_ON_ATTEMPTS})`
-        : "";
+    const suffix = plan.reason === "cut-out-retry" ? " again after a cut-out" : "";
     const message = `Turning ${this.label} ${enable ? "on" : "off"}${suffix}.`;
     if (this.failedAction === enable) {
       this.log.debug(`${message} (retry)`);
@@ -167,13 +171,7 @@ export class RelayController {
     }
 
     this.failedAction = undefined;
-    if (enable) {
-      this.unconfirmedAttempts = plan.reason === "not-confirmed-retry" ? this.unconfirmedAttempts + 1 : 1;
-      this.confirmedOn = false;
-    } else {
-      this.unconfirmedAttempts = 0;
-      this.confirmedOn = undefined;
-    }
+    this.confirmedOn = enable ? false : undefined;
     this.commandedOn = enable;
     this.observedOn = enable;
     this.lastCommandAt = this.now();

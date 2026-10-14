@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.3.9
+
+### Fixed
+- **Burner short-cycling when the boiler cuts the relay.** In a common wiring the boiler removes the
+  relay's power once the water is hot, so the relay reports off right after it was switched on.
+  2.3.2 mistook this for a failed command and switched the relay on two more times, firing the
+  burner again. Such a relay is now left off (as in 1.x); only the relay retry option re-arms it,
+  after its delay.
+- After a cut-out, a relay was treated as cut out forever, even after the heat demand ended and
+  came back. The cut-out is now forgotten once nobody needs heat, so the next demand switches the
+  relay on normally.
+
+### Changed
+- Relay retry delay is at least 5 minutes (was 1), and its help text warns about short-cycling.
+
 ## 2.3.8
 
 ### Fixed
