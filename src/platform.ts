@@ -20,6 +20,7 @@ import { VthermoAccessory } from "./thermostatAccessory.js";
 const UI_SNAPSHOT_DELAY_MS = 90_000;
 const CONTROLLER_START_TIMEOUT_MS = 30_000;
 const SUBSCRIPTION_RETRY_MS = 5 * 60_000;
+const NETWORK_DIAGNOSTICS_DELAY_MS = 2 * 60_000;
 /** How often the live status for the settings page is written. */
 const STATUS_INTERVAL_MS = 10_000;
 
@@ -115,7 +116,12 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       this.log.warn(`Could not set up sleepy (ICD) devices: ${error instanceof Error ? error.message : String(error)}`);
       return new Set<string>();
     });
-    this.runNetworkDiagnostics(this.icdNodeIds).catch(() => undefined);
+    // Give sleepy devices time to come up first: a working subscription proves the device is
+    // reachable (e.g. through a static route on the router that this host cannot see).
+    const diagnostics = setTimeout(() => {
+      this.runNetworkDiagnostics(this.icdNodeIds).catch(() => undefined);
+    }, NETWORK_DIAGNOSTICS_DELAY_MS);
+    diagnostics.unref?.();
 
     if ((this.config as VthermoPlatformConfig).instantUpdates) {
       this.startSubscriptions().catch((error) => this.log.warn(`Instant updates failed to start: ${String(error)}`));
@@ -254,10 +260,15 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       return;
     }
 
+    const reachable = new Set(this.controllerClient.getNodeStatuses()
+      .filter((status) => status.online || status.lastReportAt !== undefined)
+      .map((status) => status.nodeId));
+
     for (const [nodeId, addresses] of ipv6Nodes) {
       // Only Thread (sleepy) devices need a specific route; ordinary devices on another VLAN are
       // normally reached through the default gateway, so a missing route says nothing there.
-      if (!icdNodeIds.has(nodeId)) {
+      // A device that already answered is reachable, whatever the local route table says.
+      if (!icdNodeIds.has(nodeId) || reachable.has(nodeId)) {
         continue;
       }
       const unrouted = addresses.filter((address) => !address.toLowerCase().startsWith("fe80:") && !hasSpecificRoute(address, routes));

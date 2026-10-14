@@ -37,6 +37,8 @@ const STALE_READING_MS = 10 * 60_000;
  * a lost subscription.
  */
 const CONTACT_STALE_MS = 15 * 60_000;
+/** Sleepy devices may take a while after startup until their subscription delivers values. */
+const ICD_STARTUP_GRACE_MS = 3 * 60_000;
 
 export interface ThermostatStatus {
   id: string;
@@ -519,7 +521,10 @@ export class VthermoAccessory {
 
   /** Some sources failed but the thermostat can still work: warn once per distinct problem. */
   private reportPartialProblems(problems: string[]): void {
-    const summary = problems.join(" | ") || undefined;
+    // Sleepy devices need a moment after startup to set up their subscription; that is not a problem yet.
+    const settling = Date.now() - this.startedAt < ICD_STARTUP_GRACE_MS;
+    const relevant = settling ? problems.filter((problem) => !problem.includes("(sleepy device) has not reported")) : problems;
+    const summary = relevant.join(" | ") || undefined;
     if (summary && summary !== this.lastWarning) {
       this.platform.log.warn(`[${this.config.name}] Some sources did not answer, using the others: ${summary}`);
     }

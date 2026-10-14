@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.8
+
+### Fixed
+- False "no route to …" warning for Thread devices reached through a static route on the router:
+  the route check now runs 2 minutes after startup and skips devices that already answered.
+- "Sleepy device has not reported since startup" is no longer logged as a problem during the first
+  3 minutes, while the subscription is still being set up.
+
 ## 2.3.7
 
 ### Fixed
