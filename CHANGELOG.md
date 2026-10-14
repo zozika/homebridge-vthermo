@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.6
+
+### Changed
+- The Thread route hints also explain the static-route alternative for systems whose kernel does
+  not support `accept_ra_rt_info_max_plen` (e.g. QNAP).
+
 ## 2.3.5
 
 ### Changed

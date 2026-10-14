@@ -264,7 +264,9 @@ export class VthermoPlatform implements DynamicPlatformPlugin {
       if (unrouted.length) {
         this.log.warn(`Matter node ${nodeId}: no route to ${unrouted.join(", ")}. If this is a Thread device, the host does not `
           + "accept the Thread border routers' route announcements. On Linux run "
-          + `"sysctl -w net.ipv6.conf.${matterInterface ?? "<interface>"}.accept_ra_rt_info_max_plen=64" and make it persistent.`);
+          + `"sysctl -w net.ipv6.conf.${matterInterface ?? "<interface>"}.accept_ra_rt_info_max_plen=64" and make it persistent. `
+          + "If that setting does not exist (e.g. QNAP), add a static route to the Thread prefix via a border router "
+          + "(on this host or on your router).");
       }
     }
   }

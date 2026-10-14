@@ -912,7 +912,9 @@ export class MatterControllerClient {
     throw new Error(`This host has no route to the battery (Thread) device at ${addresses.join(", ")}: it does not accept `
       + "the Thread border routers' route announcements. On the Homebridge host run "
       + `"sysctl -w net.ipv6.conf.${this.matterInterface ?? "<interface>"}.accept_ra_rt_info_max_plen=64", wait a minute, `
-      + "check \"ip -6 route\" for a \"proto ra\" route, then pair again with a new code.");
+      + "check \"ip -6 route\" for a \"proto ra\" route, then pair again with a new code. If that setting does not exist "
+      + "(e.g. QNAP), add a static route to the Thread prefix via a border router instead "
+      + "(\"ip -6 route add <fd…::/64> via <border router fe80::…> dev <interface>\", or a static route on your router).");
   }
 
   /**
