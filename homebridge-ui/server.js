@@ -38,7 +38,10 @@ function isMatterControllerBusyError(error) {
     || message.includes("EADDRINUSE")
     || message.includes("Matter controller is already active")
     || message.includes("database is locked")
-    || message.includes("SQLITE_BUSY");
+    || message.includes("SQLITE_BUSY")
+    // matter.js 0.17 file storage lock
+    || message.includes("Storage is locked")
+    || message.includes("storage-lock");
 }
 
 function isProcessAlive(pid) {

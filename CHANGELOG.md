@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.3.3
+
+### Fixed
+- Opening the settings page right after a restart showed a raw "Storage is locked by another
+  process" error (matter.js 0.17 file lock) instead of the cached scan; it is now recognised as
+  "controller in use by the running plugin".
+- Devices that were only discovered during scans (never paired) were stored as extra peers
+  (`peer10`, `peer11`, …) and piled up in the Matter storage. They are removed after each scan and
+  once at startup.
+
 ## 2.3.2
 
 ### Fixed

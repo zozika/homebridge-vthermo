@@ -822,7 +822,20 @@ export class MatterControllerClient {
       discoveredById.set(summary.deviceIdentifier, summary);
     }
 
+    // matter.js stores every discovered device as a peer; only keep the ones we actually paired.
+    await this.removeUncommissionedPeers(discoveredNodes);
+
     return [...discoveredById.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  }
+
+  /** Deletes peers that were only discovered, never commissioned (they pile up as peerN in storage). */
+  private async removeUncommissionedPeers(nodes: Iterable<ClientNode>): Promise<void> {
+    for (const node of nodes) {
+      if (node.state.commissioning.peerAddress !== undefined) {
+        continue;
+      }
+      await node.delete().catch((error: unknown) => this.debug(`Could not remove discovered peer ${node.id}: ${errorMessage(error)}`));
+    }
   }
 
   async commissionDevice(deviceIdentifier: string, pairingCode: string): Promise<void> {
@@ -1348,6 +1361,10 @@ export class MatterControllerClient {
     }
 
     const controller = await this.controllerPromise;
+    if (this.lastController !== controller) {
+      // Leftovers from earlier scans (discovered but never paired) are dropped once per start.
+      await this.removeUncommissionedPeers([...controller.peers]);
+    }
     this.lastController = controller;
     for (const node of this.getCommissionedNodes(controller)) {
       this.disableAutoSubscribe(node);
