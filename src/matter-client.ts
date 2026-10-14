@@ -529,6 +529,21 @@ export class MatterControllerClient {
       await node.start();
     }
 
+    // After a restart matter.js may have re-established the subscription before we attached our
+    // listeners, so the "active" event was missed. Take the current state instead.
+    let alreadyActive = false;
+    try {
+      alreadyActive = await node.act("vthermo-icd-status", (agent) =>
+        Boolean((agent.get(NetworkClient) as unknown as { subscriptionActive?: boolean }).subscriptionActive));
+    } catch {
+      alreadyActive = false;
+    }
+    if (alreadyActive) {
+      tracking.active = true;
+      tracking.lastAliveAt = Date.now();
+      onChange(undefined);
+    }
+
     return () => {
       tracking.detach.forEach((detach) => detach());
       tracking.detach = [];
@@ -876,7 +891,7 @@ export class MatterControllerClient {
       // Keep the freshly commissioned node from auto-subscribing; we only poll.
       node.start = async () => undefined;
       await node.commission(commissionOptions as never);
-      this.disableAutoSubscribe(node);
+      await this.disableAutoSubscribe(node);
     } catch (error) {
       if (errorMessage(error).includes("Could not connect")) {
         const addresses = this.ipv6AddressesOf(node).join(", ") || "its advertised address";
@@ -1299,7 +1314,7 @@ export class MatterControllerClient {
   }
 
   private async startNode(node: ClientNode): Promise<void> {
-    this.disableAutoSubscribe(node);
+    await this.disableAutoSubscribe(node);
     await this.applyAddressOverride(node);
 
     if (node.lifecycle.isOnline) {
@@ -1325,13 +1340,22 @@ export class MatterControllerClient {
     }
   }
 
-  private disableAutoSubscribe(node: ClientNode): void {
-    // Sleepy devices depend on matter.js' own subscription (see enableIcdSubscription).
-    if (this.icdTracking.has(node.id) || node.state.network.autoSubscribe === false) {
+  /**
+   * We poll regular devices, so matter.js must not keep its own full-node subscription to them.
+   * Sleepy (ICD) devices are the exception: they rely on that subscription (see
+   * enableIcdSubscription). The change goes through a transaction (node.set); a direct write to
+   * node.state throws "This view is read-only" in matter.js 0.17.
+   */
+  private async disableAutoSubscribe(node: ClientNode): Promise<void> {
+    if (this.icdTracking.has(node.id) || this.getIcdInfo(node) !== undefined || node.state.network.autoSubscribe === false) {
       return;
     }
 
-    (node.state.network as { autoSubscribe: boolean }).autoSubscribe = false;
+    try {
+      await node.set({ network: { autoSubscribe: false } } as never);
+    } catch (error) {
+      this.debug(`[${getNodeName(node)}] could not disable auto-subscribe: ${errorMessage(error)}`);
+    }
   }
 
   private async applyAddressOverride(node: ClientNode): Promise<void> {
@@ -1407,7 +1431,7 @@ export class MatterControllerClient {
     }
     this.lastController = controller;
     for (const node of this.getCommissionedNodes(controller)) {
-      this.disableAutoSubscribe(node);
+      await this.disableAutoSubscribe(node);
       // Fixed addresses must be stored before the controller starts: matter.js loads each peer's
       // operational address from this state and immediately starts reconnecting to it.
       if (this.addressOverrides.has(node.id)) {

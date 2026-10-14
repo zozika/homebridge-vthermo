@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.7
+
+### Fixed
+- **The Matter controller did not start ("This view is read-only")** once a device paired with
+  matter.js 0.17 was in the storage, e.g. a newly paired battery Thread sensor. The plugin turned
+  off matter.js' own auto-subscription by writing the node state directly, which 0.17 only allows
+  inside a transaction. The change now goes through a transaction, and sleepy (ICD) devices are
+  left subscribed as they need it. Without the controller no thermostat could read temperatures.
+- After a restart a sleepy device's subscription could already be active before the plugin
+  listened for it, so its values were reported as missing for up to a minute.
+- New end-to-end regression test: `test/e2e/run-restart.mjs`.
+
 ## 2.3.6
 
 ### Changed
