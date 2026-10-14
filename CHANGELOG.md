@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.5
+
+### Changed
+- Pairing a battery (Thread) device checks first whether the host has a route to the device's
+  Thread network (Linux) and stops right away with the fix (`accept_ra_rt_info_max_plen=64`)
+  instead of a long timeout.
+- "Could not connect to device" during pairing now says which address did not answer and what to check.
+
 ## 2.3.4
 
 ### Fixed

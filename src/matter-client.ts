@@ -51,6 +51,7 @@ import {
   type MatterPairedNodeSummary,
 } from "./matter-model.js";
 import { installMatterCompatibilityPatches } from "./matter-compat.js";
+import { hasSpecificRoute, readIpv6Routes } from "./network-diagnostics.js";
 import { NodeGuard } from "./node-guard.js";
 import { MATTER_CONTROLLER_NODE_ID, MATTER_STORAGE_DIRECTORY, PLUGIN_VERSION } from "./settings.js";
 
@@ -865,16 +866,53 @@ export class MatterControllerClient {
     }
 
     const node = await controller.peers.locate(discoveryOptions as never);
-    const originalStart = node.start.bind(node);
+    const sleepy = this.getIcdInfo(node) !== undefined;
+    if (sleepy) {
+      await this.assertRouteToDevice(node);
+    }
 
+    const originalStart = node.start.bind(node);
     try {
       // Keep the freshly commissioned node from auto-subscribing; we only poll.
       node.start = async () => undefined;
       await node.commission(commissionOptions as never);
       this.disableAutoSubscribe(node);
+    } catch (error) {
+      if (errorMessage(error).includes("Could not connect")) {
+        const addresses = this.ipv6AddressesOf(node).join(", ") || "its advertised address";
+        throw new Error(`The device was found but did not answer at ${addresses}. `
+          + (sleepy
+            ? "Battery Thread devices: keep it awake while pairing (open/close it) and make sure this host has a route "
+              + "to the Thread network (Linux: net.ipv6.conf.<interface>.accept_ra_rt_info_max_plen=64)."
+            : "Check that Homebridge can reach that address (IPv6 enabled, firewall allows UDP 5540)."));
+      }
+      throw error;
     } finally {
       node.start = originalStart;
     }
+  }
+
+  private ipv6AddressesOf(node: ClientNode): string[] {
+    return (node.state.commissioning.addresses ?? [])
+      .map((address) => (address as { ip?: string }).ip)
+      .filter((ip): ip is string => typeof ip === "string" && ip.includes(":") && !ip.toLowerCase().startsWith("fe80:"));
+  }
+
+  /**
+   * A Thread device is only reachable when the host learned the route to the Thread network from
+   * the border routers. Fail fast with the fix instead of a 3-minute commissioning timeout.
+   */
+  private async assertRouteToDevice(node: ClientNode): Promise<void> {
+    const addresses = this.ipv6AddressesOf(node);
+    const routes = await readIpv6Routes();
+    if (!routes || !addresses.length || addresses.some((address) => hasSpecificRoute(address, routes))) {
+      return;
+    }
+
+    throw new Error(`This host has no route to the battery (Thread) device at ${addresses.join(", ")}: it does not accept `
+      + "the Thread border routers' route announcements. On the Homebridge host run "
+      + `"sysctl -w net.ipv6.conf.${this.matterInterface ?? "<interface>"}.accept_ra_rt_info_max_plen=64", wait a minute, `
+      + "check \"ip -6 route\" for a \"proto ra\" route, then pair again with a new code.");
   }
 
   /**
