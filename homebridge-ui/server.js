@@ -7,8 +7,14 @@ import { HomebridgePluginUiServer, RequestError } from "@homebridge/plugin-ui-ut
 import { MatterControllerClient } from "../dist/matter-client.js";
 import { CONTROL_FILE, MATTER_STORAGE_DIRECTORY, STATUS_FILE } from "../dist/settings.js";
 
-/** Pairing a large bridge can take a while; the running plugin answers when it is done. */
+/** Scans of large bridges can take a while; the running plugin answers when it is done. */
 const BRIDGE_REQUEST_TIMEOUT_MS = 180_000;
+/**
+ * Pairing in the plugin may take discovery (60 s) + open-window lookup (8 s) + commissioning of a
+ * sleepy device (180 s) + the follow-up scan. Wait longer than all of that, so the page never gives
+ * up while the plugin is still pairing.
+ */
+const BRIDGE_PAIR_TIMEOUT_MS = 420_000;
 
 const POST_COMMISSIONING_SETTLE_MS = 2500;
 
@@ -147,7 +153,7 @@ class UiServer extends HomebridgePluginUiServer {
    * Sends the request to the running Vthermo child bridge, which owns the Matter controller.
    * Returns undefined when the plugin is not running, so the caller can use its own controller.
    */
-  async viaRunningPlugin(path, body = {}) {
+  async viaRunningPlugin(path, body = {}, timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS) {
     let control;
     try {
       control = JSON.parse(await readFile(join(this.storagePath, MATTER_STORAGE_DIRECTORY, CONTROL_FILE), "utf8"));
@@ -165,7 +171,7 @@ class UiServer extends HomebridgePluginUiServer {
         method: "POST",
         headers: { authorization: `Bearer ${control.token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       if (isConnectionRefused(error)) {
@@ -279,7 +285,7 @@ class UiServer extends HomebridgePluginUiServer {
       throw requestError("missingPairingCode", "Enter the Matter manual pairing code or paste the MT: QR pairing code.");
     }
 
-    const viaPlugin = await this.viaRunningPlugin("/pair", { deviceIdentifier, pairingCode });
+    const viaPlugin = await this.viaRunningPlugin("/pair", { deviceIdentifier, pairingCode }, BRIDGE_PAIR_TIMEOUT_MS);
     if (viaPlugin) {
       return viaPlugin.result;
     }

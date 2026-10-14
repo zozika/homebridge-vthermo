@@ -70,7 +70,7 @@
       "status.cached": "Showing the scan from {time}.",
       "status.unsaved": "Unsaved changes. Click Save.",
       "status.saved": "Saved to Homebridge. Restart the Vthermo child bridge to apply.",
-      "status.pairing": "Pairing… this can take up to a minute.",
+      "status.pairing": "Pairing… this can take up to a minute, battery (sleepy) devices up to 5 minutes. Keep this page open.",
       "status.paired": "Matter pairing completed.",
       "status.unpaired": "Matter pairing removed.",
 
@@ -216,7 +216,7 @@
       "status.cached": "A {time} időpontban mentett keresés látható.",
       "status.unsaved": "Nem mentett változások. Kattints a Mentésre.",
       "status.saved": "Elmentve. A Vthermo child bridge újraindítása után lép életbe.",
-      "status.pairing": "Párosítás… ez akár egy percig is tarthat.",
+      "status.pairing": "Párosítás… ez akár egy percig, elemes (alvó) eszközöknél 5 percig is tarthat. Ne zárd be az oldalt.",
       "status.paired": "A Matter párosítás kész.",
       "status.unpaired": "A Matter párosítás törölve.",
 

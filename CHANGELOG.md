@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.4
+
+### Fixed
+- Pairing a battery (sleepy) device from the settings page failed with "The operation was aborted
+  due to timeout": the page gave up after 180 s while the running plugin was still pairing (it allows
+  up to ~250 s). The page now waits up to 7 minutes and says that sleepy devices can take a while.
+
 ## 2.3.3
 
 ### Fixed
